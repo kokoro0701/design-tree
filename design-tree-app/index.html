@@ -1,0 +1,4260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#132236">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="設計ツリー">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script src="firebase-config.js"></script>
+<style>:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); } body { margin: 0; }</style>
+<title>プログラム設計ツリー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=M+PLUS+1+Code:wght@400;500;700&display=swap">
+<style>
+  /* レイアウト: 縦1列のツリー。方眼紙(設計図)の上に処理ブロックを並べるイメージ */
+  :root {
+    --bg: #e9eef4;          /* 方眼紙 */
+    --grid: #d6dee8;        /* 方眼の線 */
+    --panel: #ffffff;       /* ノードの面 */
+    --ink: #132236;         /* 文字 */
+    --muted: #5a6a7f;       /* 補足文字 */
+    --k-group: #6b7a8f;     /* ノードの種類の色: グループ */
+    --k-ns: #7a3fc2;        /* namespace */
+    --k-class: #2457d6;     /* クラス */
+    --k-fn: #0d7a68;        /* 関数 */
+    --k-var: #a35400;       /* 変数 */
+    --line: #9fb0c4;        /* ツリーの線 */
+    --accent: #2457d6;      /* 追加ボタン・強調 */
+    --accent-ink: #ffffff;
+    --danger: #c23b30;      /* 削除 */
+    --root: #132236;        /* ルートノードの面 */
+    --root-ink: #f2f6fb;
+    --font-ui: "M PLUS 1 Code", "Hiragino Sans", "Noto Sans JP", "Yu Gothic", monospace;
+    --font-display: "DotGothic16", "M PLUS 1 Code", monospace;
+    --indent: 16px;         /* 1階層ぶんの字下げ */
+    --row: 48px;            /* 1行の最低の高さ(タップしやすさ) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1621; --grid: #16212f; --panel: #162231; --ink: #dce6f2; --muted: #8696aa;
+      --k-group: #8696aa; --k-ns: #b48cff; --k-class: #6f9bff; --k-fn: #4fd1b8; --k-var: #f0a85a;
+      --line: #3d5068; --accent: #6f9bff; --accent-ink: #0b1220; --danger: #ff7b6e;
+      --root: #dce6f2; --root-ink: #0e1621; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1621; --grid: #16212f; --panel: #162231; --ink: #dce6f2; --muted: #8696aa;
+      --k-group: #8696aa; --k-ns: #b48cff; --k-class: #6f9bff; --k-fn: #4fd1b8; --k-var: #f0a85a;
+    --line: #3d5068; --accent: #6f9bff; --accent-ink: #0b1220; --danger: #ff7b6e;
+    --root: #dce6f2; --root-ink: #0e1621; color-scheme: dark;
+  }
+  @media (min-width: 600px) { :root { --indent: 24px; } }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { overflow-x: hidden; }
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: 16px;
+    color: var(--ink);
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button { font: inherit; color: inherit; }
+
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 16px 120px;
+  }
+
+  /* ---------- ヘッダー ---------- */
+  .header { display: flex; flex-direction: column; gap: 4px; padding-block: 8px 16px; }
+  .header h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 1.5rem;
+    letter-spacing: 0.04em;
+  }
+  .status {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    font-size: 0.8rem; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .status b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- ツリー ---------- */
+  ul.tree, ul.children { list-style: none; margin: 0; padding: 0; }
+  ul.children { margin-left: calc(var(--indent) + 4px); }
+  li.node { position: relative; }
+  ul.children > li.node { padding-left: var(--indent); padding-top: 6px; }
+
+  /* 枝の線: 縦線(::after)と横線(::before) */
+  ul.children > li.node::after {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+    border-left: 2px solid var(--line);
+  }
+  ul.children > li.node:last-child::after { bottom: auto; height: calc(6px + var(--row) / 2); }
+  ul.children > li.node::before {
+    content: ""; position: absolute; left: 0; width: calc(var(--indent) - 2px);
+    top: calc(6px + var(--row) / 2 - 1px);
+    border-top: 2px solid var(--line);
+  }
+
+  .row {
+    display: flex; align-items: stretch;
+    min-height: var(--row);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .row.is-root { background: var(--root); color: var(--root-ink); border-color: var(--root); }
+
+  /* 長押しでドラッグするので、文字選択やiPhoneの長押しメニューを出さない */
+  .row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .row .name-input { -webkit-user-select: text; user-select: text; }
+
+  /* ---------- ドラッグ&ドロップ ---------- */
+  body.is-dragging { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+  body.is-dragging .row { cursor: grabbing; }
+  li.dragging > .row, li.dragging > ul.children { opacity: 0.35; }  /* 動かしているノードは半透明 */
+
+  /* 中に入れる (子にする) */
+  .row.drop-inside {
+    outline: 3px solid var(--accent); outline-offset: 1px;
+    background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  }
+  .row.is-root.drop-inside { background: var(--root); }
+  /* 移動できない場所 */
+  .row.drop-invalid { outline: 2px dashed var(--danger); outline-offset: 1px; }
+
+  /* 前・後ろに入れるときの挿入線 */
+  .drop-line {
+    position: fixed; z-index: 25; height: 4px; pointer-events: none;
+    background: var(--accent); border-radius: 2px;
+  }
+  .drop-line::before {
+    content: ""; position: absolute; left: -6px; top: -4px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--panel); border: 3px solid var(--accent); box-sizing: border-box;
+  }
+
+  /* 指(マウス)についてくる影 */
+  .ghost {
+    position: fixed; z-index: 30; pointer-events: none;
+    max-width: 70vw; padding: 10px 14px;
+    background: var(--panel); color: var(--ink);
+    border: 2px solid var(--accent); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(8, 14, 22, 0.28);
+    font-weight: 700; overflow-wrap: anywhere;
+    transform: rotate(-2deg);
+  }
+  .ghost .ghost-sub { display: block; font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+  .ghost.invalid { border-color: var(--danger); }
+  .ghost.invalid .ghost-sub { color: var(--danger); }
+
+  /* 開閉ボタン(▼/▶) */
+  .toggle {
+    flex: none; width: 40px;
+    display: grid; place-items: center;
+    background: none; border: 0; cursor: pointer;
+    font-size: 0.85rem; color: var(--accent);
+  }
+  .is-root .toggle { color: inherit; }
+  .toggle.leaf { cursor: default; color: var(--line); font-size: 0.6rem; }
+
+  /* ノード名 (タップで編集) */
+  .name {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 4px;
+    background: none; border: 0; text-align: left; cursor: text;
+    line-height: 1.45;
+    overflow-wrap: anywhere; word-break: break-word;
+  }
+  .is-root .name { font-weight: 700; }
+  .tag {
+    flex: none;
+    font-family: var(--font-display); font-size: 0.7rem; letter-spacing: 0.08em;
+    padding: 1px 6px; border-radius: 3px;
+    background: var(--accent); color: var(--accent-ink);
+  }
+  .count { flex: none; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .is-root .count { color: inherit; opacity: 0.7; }
+
+  .name-input {
+    flex: 1; min-width: 0;
+    margin: 6px 4px;
+    padding: 6px 8px;
+    font: inherit; font-size: 16px; /* 16px以上でiPhoneの自動ズームを防ぐ */
+    color: var(--ink); background: var(--bg);
+    border: 2px solid var(--accent); border-radius: 4px;
+    outline: none;
+  }
+
+  /* 右側のボタン(＋ / ×) */
+  .actions { flex: none; display: flex; }
+  .btn-icon {
+    width: 44px; min-height: 44px;
+    display: grid; place-items: center;
+    background: none; border: 0; cursor: pointer;
+    font-size: 1.4rem; line-height: 1;
+  }
+  .btn-add { color: var(--accent); }
+  .is-root .btn-add { color: inherit; }
+  .btn-del { color: var(--muted); font-size: 1.2rem; }
+  .btn-del:active { color: var(--danger); }
+  .btn-icon:active, .toggle:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+  button:focus-visible, .name-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .hint {
+    margin-top: 20px; padding: 12px 14px;
+    font-size: 0.85rem; line-height: 1.7; color: var(--muted);
+    border: 1px dashed var(--line); border-radius: 6px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+  }
+  .hint p { margin: 0; }
+
+  /* ---------- 削除確認 ---------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(8, 14, 22, 0.55);
+  }
+  .dialog {
+    width: 100%; max-width: 480px;
+    margin: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 20px 18px 16px;
+    background: var(--panel); color: var(--ink);
+    border-radius: 10px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .dialog h2 { margin: 0; font-size: 1.05rem; }
+  .dialog p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+  .dialog-buttons { display: flex; gap: 10px; }
+  .dialog-buttons button {
+    flex: 1; min-height: 52px; border-radius: 8px; cursor: pointer; font-weight: 700;
+  }
+  .btn-cancel { background: none; border: 1px solid var(--line); }
+  .btn-danger { background: var(--danger); color: #fff; border: 0; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); border: 0; }
+
+  /* ---------- 保存・読み込み ---------- */
+  .title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .toolbar { display: flex; gap: 8px; flex: none; margin-left: auto; }
+  .tool-btn {
+    min-height: 44px; padding: 0 14px;
+    border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  .tool-btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  /* 入力欄がある画面はキーボードに隠れないよう上に出す */
+  .overlay.top { align-items: flex-start; }
+  .overlay.top .dialog { margin: calc(12px + env(safe-area-inset-top, 0px)) 12px 0; }
+  .field { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+  .text-input {
+    min-height: 48px; padding: 8px 12px;
+    font: inherit; font-size: 16px; color: var(--ink);
+    background: var(--bg); border: 2px solid var(--line); border-radius: 6px; outline: none;
+  }
+  .text-input:focus { border-color: var(--accent); }
+  .error { color: var(--danger); font-size: 0.85rem; }
+
+  /* ---------- プロジェクト一覧画面 ---------- */
+  .screen-label {
+    margin: 0; font-size: 0.75rem; letter-spacing: 0.12em; color: var(--muted);
+  }
+  .project-list {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .project-item {
+    display: flex; align-items: stretch;
+    background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  .project-open {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 14px 14px; min-height: 68px;
+    background: none; border: 0; text-align: left; cursor: pointer;
+  }
+  .project-open:active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .p-name { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+  .p-meta {
+    display: flex; flex-wrap: wrap; gap: 2px 12px;
+    font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .btn-more {
+    flex: none; width: 52px;
+    background: none; border: 0; border-left: 1px solid var(--line);
+    font-size: 1.7rem; line-height: 1; color: var(--muted); cursor: pointer;
+  }
+  .btn-more:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+  .empty {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    padding: 36px 16px; text-align: center; color: var(--muted); line-height: 1.7;
+    border: 1px dashed var(--line); border-radius: 6px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+  }
+  .empty p { margin: 0; }
+
+  /* ---------- ツリー編集画面のヘッダー ---------- */
+  .back-btn { padding: 0 12px 0 8px; }
+  .project-title {
+    margin: 4px 0 0; font-size: 1.25rem; font-weight: 700; line-height: 1.4;
+    overflow-wrap: anywhere; text-wrap: balance;
+  }
+  .save-state { color: var(--muted); }
+  .sync-state { margin: 0; font-size: 0.8rem; color: var(--muted); }
+  .sync-state::before { content: "● "; color: var(--line); }
+  .sync-state[data-state="synced"]::before { color: var(--accent); }
+  .sync-state[data-state="saving"]::before, .sync-state[data-state="connecting"]::before { color: var(--muted); }
+  .sync-state[data-state="error"]::before, .sync-state[data-state="unavailable"]::before { color: var(--danger); }
+
+  /* ---------- コード生成画面 ---------- */
+  .title-row { flex-wrap: wrap; }
+  .sticky-bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    margin-inline: -16px; padding: 10px 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--grid);
+  }
+  .code-options { display: flex; flex-direction: column; gap: 12px; padding-block: 4px 14px; }
+  .option-label { font-size: 0.75rem; letter-spacing: 0.12em; color: var(--muted); }
+  .segmented {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    background: var(--panel);
+  }
+  .segmented button {
+    min-height: 48px; border: 0; background: none; cursor: pointer; font-weight: 700;
+  }
+  .segmented button + button { border-left: 1px solid var(--line); }
+  .segmented button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .select {
+    min-height: 44px; padding: 0 10px; font: inherit; font-size: 16px;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  .option-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .code-editor {
+    display: block; width: 100%; min-height: 240px;
+    padding: 14px 12px;
+    font-family: var(--font-ui); font-size: 16px; line-height: 1.55;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px;
+    white-space: pre; overflow-x: auto; overflow-y: hidden; resize: none;
+    tab-size: 4; outline: none;
+  }
+  .code-editor:focus { border-color: var(--accent); }
+  .code-note { margin: 10px 0 0; font-size: 0.8rem; line-height: 1.6; color: var(--muted); }
+
+  .name-map {
+    margin-top: 16px; padding: 0 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .name-map summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+  .name-map table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 0.85rem; }
+  .name-map td { padding: 8px 4px; border-top: 1px solid var(--grid); vertical-align: top; overflow-wrap: anywhere; }
+  .name-map td:last-child { font-weight: 700; }
+  .name-map .fallback td:last-child { color: var(--danger); }
+
+  /* ---------- ノードの種類の表示 (ツリー上) ---------- */
+  .label-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .label-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .kind-chip {
+    flex: none; padding: 0 5px; border-radius: 3px;
+    font-size: 0.62rem; font-weight: 700; line-height: 1.6; letter-spacing: 0.04em;
+    border: 1px solid var(--k-color); color: var(--k-color);
+  }
+  .kind-chip.group { --k-color: var(--k-group); border-style: dashed; }
+  .kind-chip.namespace { --k-color: var(--k-ns); background: var(--k-ns); color: var(--accent-ink); }
+  .kind-chip.class { --k-color: var(--k-class); background: var(--k-class); color: var(--accent-ink); }
+  .kind-chip.function { --k-color: var(--k-fn); }
+  .kind-chip.variable { --k-color: var(--k-var); }
+  .is-root .kind-chip { border-color: currentColor; color: inherit; background: none; }
+  /* 行の左端を種類の色にする (スマホでも一目で分かるように) */
+  .row[data-kind="namespace"] { border-left: 4px solid var(--k-ns); }
+  .row[data-kind="class"] { border-left: 4px solid var(--k-class); }
+  .row[data-kind="function"] { border-left: 4px solid var(--k-fn); }
+  .row[data-kind="variable"] { border-left: 4px solid var(--k-var); }
+  .row.is-root[data-kind] { border-left-width: 4px; }
+  /* 種類ボタン (5つ) は 3 + 2 の2段 */
+  #kind-buttons { grid-auto-flow: row; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--line); }
+  #kind-buttons button { grid-column: span 2; background: var(--panel); }
+  #kind-buttons button:nth-child(n+4) { grid-column: span 3; }
+  #kind-buttons button + button { border-left: 0; }
+  #kind-buttons button[aria-pressed="true"] { background: var(--accent); }
+  .rules-note { margin: 0 0 12px; font-size: 0.78rem; line-height: 1.6; color: var(--muted); }
+  .cpp-rules { margin: 0 0 14px; }
+  .cpp-rules summary > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .rules-summary { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+  .cpp-rules td:first-child { width: 32%; font-weight: 700; word-break: keep-all; }
+  .cpp-rules td:last-child { font-weight: 400; }
+  .rule-name { display: block; font-weight: 700; }
+  .rule-example { display: block; font-size: 0.78rem; color: var(--muted); }
+  .node-meta { font-size: 0.75rem; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+  .is-root .node-meta { color: inherit; opacity: 0.75; }
+
+  /* ---------- ノードの設定画面 ---------- */
+  .dialog.settings {
+    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px));
+    overflow-y: auto;
+  }
+  .field .segmented button { font-size: 0.9rem; color: var(--ink); }
+  .field .segmented button[aria-pressed="true"] { color: var(--accent-ink); }
+  .kind-hint { margin: 0; font-size: 0.8rem; line-height: 1.6; }
+  .code-input { font-family: var(--font-ui); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    min-height: 40px; padding: 0 12px; border-radius: 20px; cursor: pointer;
+    font-family: var(--font-ui); font-size: 0.85rem; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line);
+  }
+  .param-list { display: flex; flex-direction: column; gap: 8px; }
+  .param-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 6px; align-items: center; }
+  .param-row .text-input { min-width: 0; width: 100%; }
+  .param-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 6px; font-size: 0.75rem; }
+  .param-empty { margin: 0; font-size: 0.8rem; }
+  .add-param { align-self: flex-start; }
+
+  /* ---------- アカウント (独立アプリ版) ---------- */
+  #account-signed-out { display: flex; flex-direction: column; gap: 12px; }
+  .account-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .account-email { font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+  .sheet-btn.primary-sheet { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); justify-content: center; }
+
+  /* ---------- 英語名 ---------- */
+  .english-panel {
+    margin: 0 0 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+    background: color-mix(in srgb, var(--k-var) 8%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--k-var) 45%, var(--line)); border-radius: 6px;
+  }
+  .english-title { margin: 0; font-weight: 700; font-size: 0.9rem; }
+  .english-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+  .english-list li { overflow-wrap: anywhere; }
+  .english-list .auto { color: var(--muted); font-family: var(--font-ui); }
+  .english-panel .rules-note { margin: 0; }
+  .english-warn { color: var(--danger); }
+
+  /* ---------- 継承・関数の設定 ---------- */
+  .inherit-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 44px; gap: 6px; align-items: center; }
+  .inherit-row .select { width: 100%; min-width: 0; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+  #flag-ctor { flex-basis: 100%; } /* コンストラクタは1段目、Virtual / Override は2段目 */
+  .toggle-btn {
+    flex: 1 1 0; min-width: 0;
+    min-height: 52px; padding: 4px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    font-weight: 700; font-size: 0.82rem; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .toggle-btn .state { font-size: 0.7rem; font-weight: 700; color: var(--muted); }
+  .toggle-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .toggle-btn[aria-pressed="true"] .state { color: inherit; }
+  .toggle-btn[hidden] { display: none; }
+  .text-input:disabled { opacity: 0.7; }
+  .btn-node-menu { color: var(--muted); font-size: 1.5rem; }
+  .is-root .btn-node-menu { color: inherit; }
+  /* コピーした直後のノードを目立たせる */
+  .row.just-copied { animation: just-copied 2s ease-out; }
+  @keyframes just-copied {
+    0%, 45% { box-shadow: 0 0 0 3px var(--accent); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) { .row.just-copied { animation: none; outline: 3px solid var(--accent); } }
+
+  /* ---------- C++クラス生成 ---------- */
+  .class-area { display: flex; flex-direction: column; gap: 12px; }
+  .class-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .class-tabs .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .file-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .notice {
+    margin: 0; padding: 10px 12px; list-style: none;
+    font-size: 0.8rem; line-height: 1.6; color: var(--ink);
+    background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line)); border-radius: 6px;
+  }
+  .class-empty {
+    padding: 20px 14px; font-size: 0.9rem; line-height: 1.7; color: var(--muted);
+    border: 1px dashed var(--line); border-radius: 6px; background: var(--panel);
+  }
+  .file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .file-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .file-row .file-name { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+  .section-title { margin: 6px 0 0; font-size: 0.75rem; letter-spacing: 0.12em; color: var(--muted); font-weight: 400; }
+
+  /* ---------- 操作メニュー (名前変更・複製・削除) ---------- */
+  .sheet-title { overflow-wrap: anywhere; }
+  .sheet-buttons { display: flex; flex-direction: column; gap: 8px; }
+  .sheet-btn {
+    min-height: 52px; padding: 0 16px;
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    font-weight: 700; text-align: left; cursor: pointer;
+  }
+  .sheet-btn .icon { width: 1.4em; text-align: center; color: var(--accent); }
+  .sheet-btn.danger { color: var(--danger); }
+  .sheet-btn.danger .icon { color: var(--danger); }
+
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%); z-index: 20;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    max-width: calc(100% - 32px);
+    padding: 12px 18px; border-radius: 8px;
+    background: var(--root); color: var(--root-ink);
+    font-size: 0.9rem; overflow-wrap: anywhere;
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 画面1: プロジェクト一覧 ===== -->
+<div class="app" id="projects-screen">
+  <header class="header">
+    <div class="title-row">
+      <h1>設計ツリー</h1>
+      <div class="toolbar">
+        <button type="button" class="tool-btn primary" id="new-btn">＋ 新規作成</button>
+      </div>
+    </div>
+    <p class="screen-label">プロジェクト一覧</p>
+    <p class="sync-state" id="sync-state" role="status"></p>
+    <!-- 独立アプリ版だけ表示: ログイン / アカウント -->
+    <div class="account-row" id="account-row" hidden>
+      <span class="account-email" id="account-email"></span>
+      <button type="button" class="tool-btn" id="account-btn">ログイン</button>
+    </div>
+  </header>
+
+  <ul class="project-list" id="project-list"></ul>
+</div>
+
+<!-- ===== 画面2: ツリー編集 ===== -->
+<div class="app" id="editor-screen" hidden>
+  <header class="header">
+    <div class="title-row">
+      <button type="button" class="tool-btn back-btn" id="back-btn">‹ プロジェクト一覧</button>
+      <div class="toolbar">
+        <button type="button" class="tool-btn" id="code-btn">コード生成</button>
+        <button type="button" class="tool-btn primary" id="save-btn">保存</button>
+      </div>
+    </div>
+    <h2 class="project-title" id="project-title"></h2>
+    <div class="status" id="status"></div>
+  </header>
+
+  <ul class="tree" id="tree"></ul>
+
+  <div class="hint">
+    <p>＋ でその処理をさらに細かい処理に分解します。</p>
+    <p>ノードをタップすると、名前や種類(クラス・関数・変数・グループ)を設定できます。▼ / ▶ で開閉、⋯ で編集・コピー・削除ができます。</p>
+    <p>長押ししてから動かすと移動できます。ノードの中央に落とすとその中へ、上側・下側に落とすと前・後ろに並びます。</p>
+    <p>変更は自動で保存されます。</p>
+  </div>
+</div>
+
+<!-- 確認画面 (削除・上書きなどで使い回す) -->
+<div class="overlay" id="confirm" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="confirm-cancel">キャンセル</button>
+      <button type="button" class="btn-danger" id="confirm-ok"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 画面3: コード生成 ===== -->
+<div class="app" id="code-screen" hidden>
+  <div class="sticky-bar">
+    <div class="title-row">
+      <button type="button" class="tool-btn back-btn" id="code-back-btn">‹ 戻る</button>
+      <div class="toolbar">
+        <button type="button" class="tool-btn" id="regen-btn">再生成</button>
+        <button type="button" class="tool-btn primary" id="copy-btn">コピー</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="header">
+    <p class="screen-label">コード生成</p>
+    <h2 class="project-title" id="code-title"></h2>
+  </header>
+
+  <div class="code-options">
+    <div class="option-label" id="lang-label">言語</div>
+    <div class="segmented" id="lang-buttons" role="group" aria-labelledby="lang-label"></div>
+    <!-- C++ のときだけ表示: 通常 / クラス生成 -->
+    <div class="segmented" id="mode-buttons" role="group" aria-label="生成のしかた" hidden>
+      <button type="button" data-mode="normal">通常のコード生成</button>
+      <button type="button" data-mode="class">C++クラス生成</button>
+    </div>
+    <div class="option-row" id="style-row">
+      <label class="option-label" for="style-select">関数名の書き方</label>
+      <select class="select" id="style-select"></select>
+    </div>
+  </div>
+
+  <!-- ローマ字読み・仮の名前になっている名前 (英語名をすすめる) -->
+  <div class="english-panel" id="english-panel" hidden>
+    <p class="english-title" id="english-title"></p>
+    <ul class="english-list" id="english-list"></ul>
+    <div class="file-actions">
+      <button type="button" class="tool-btn primary" id="ai-english-btn" hidden>AIで英語名を提案</button>
+    </div>
+    <p class="rules-note" id="english-note">ノードの設定の「コードで使う名前 (英語)」に入力すると、その名前でコードを作ります。</p>
+  </div>
+
+  <!-- C++ のときだけ表示: いまの命名規則 -->
+  <details class="name-map cpp-rules" id="cpp-rules" hidden>
+    <summary><span>C++ 命名規則<span class="rules-summary">PascalCase · arg_ · m_ + 初期値</span></span></summary>
+    <table><tbody id="cpp-rules-body"></tbody></table>
+    <p class="rules-note">C++ のコードを作るときは、いつもこの規則で名前を付けます。設計ツリーの名前が日本語や player_controller のような形でも、この規則に合わせて変換します。</p>
+  </details>
+
+  <!-- C++クラス生成のときだけ表示 -->
+  <div class="class-area" id="class-area" hidden>
+    <ul class="notice" id="class-notices" hidden></ul>
+    <div class="class-empty" id="class-empty" hidden>
+      設計ツリーにクラスがありません。ツリー画面でノードをタップして、種類を「クラス」にしてください。クラスの中に「関数」や「変数」のノードを入れると、C++ のクラスとして生成できます。
+    </div>
+    <div class="class-tabs" id="class-tabs" role="group" aria-label="クラス"></div>
+    <div class="segmented" id="file-tabs" role="group" aria-label="ファイル"></div>
+  </div>
+
+  <textarea class="code-editor" id="code-editor" wrap="off" spellcheck="false"
+    autocapitalize="off" autocomplete="off" aria-label="生成されたコード"></textarea>
+
+  <div class="file-actions" id="file-actions" hidden>
+    <button type="button" class="tool-btn" id="download-btn">ダウンロード</button>
+  </div>
+
+  <p class="code-note" id="code-note"></p>
+
+  <div class="class-area" id="file-list-area" hidden>
+    <h3 class="section-title">ファイル一覧</h3>
+    <ul class="file-list" id="file-list"></ul>
+    <button type="button" class="tool-btn" id="zip-btn">すべてまとめてダウンロード (ZIP)</button>
+  </div>
+
+  <details class="name-map" id="name-map">
+    <summary id="name-map-summary">名前の変換</summary>
+    <table><tbody id="name-map-body"></tbody></table>
+  </details>
+</div>
+
+<!-- アカウント (独立アプリ版だけ): ログイン・新規登録・パスワード再設定・ログアウト -->
+<div class="overlay top" id="account-dialog" hidden>
+  <form class="dialog settings" id="account-form" role="dialog" aria-modal="true" aria-labelledby="account-title" novalidate>
+    <h2 id="account-title">ログイン</h2>
+    <div id="account-signed-out">
+      <p class="kind-hint">ログインすると、スマホと PC で同じプロジェクトを使えます (同期)。</p>
+      <label class="field" for="account-email-input">メールアドレス
+        <input type="email" class="text-input" id="account-email-input" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false">
+      </label>
+      <label class="field" for="account-password-input">パスワード (6文字以上)
+        <input type="password" class="text-input" id="account-password-input" autocomplete="current-password">
+      </label>
+    </div>
+    <div id="account-signed-in" hidden>
+      <p class="kind-hint" id="account-signed-in-text"></p>
+    </div>
+    <p class="error" id="account-error" role="alert" hidden></p>
+    <p class="kind-hint" id="account-info" role="status" hidden></p>
+    <div class="sheet-buttons" id="account-actions-out">
+      <button type="submit" class="sheet-btn primary-sheet" id="account-login">ログイン</button>
+      <button type="button" class="sheet-btn" id="account-signup">新しく登録する</button>
+      <button type="button" class="sheet-btn" id="account-reset">パスワードを忘れた</button>
+    </div>
+    <div class="sheet-buttons" id="account-actions-in" hidden>
+      <button type="button" class="sheet-btn danger" id="account-logout">ログアウト</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="account-close">閉じる</button>
+    </div>
+  </form>
+</div>
+
+<!-- ノードのメニュー (⋯ ボタンで開く): 編集 / コピー / 削除 -->
+<div class="overlay" id="node-menu" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="node-menu-title">
+    <h2 class="sheet-title" id="node-menu-title"></h2>
+    <div class="sheet-buttons">
+      <button type="button" class="sheet-btn" id="nm-edit"><span class="icon">✎</span>編集</button>
+      <button type="button" class="sheet-btn" id="nm-copy"><span class="icon">⧉</span>コピー</button>
+      <button type="button" class="sheet-btn danger" id="nm-delete"><span class="icon">×</span>削除</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="nm-cancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ノードの設定 (ノードをタップすると開く) -->
+<div class="overlay top" id="node-dialog" hidden>
+  <form class="dialog settings" id="node-form" role="dialog" aria-modal="true" aria-labelledby="node-title">
+    <h2 id="node-title">ノードの設定</h2>
+    <label class="field" for="node-name">名前
+      <input type="text" class="text-input" id="node-name" maxlength="80" enterkeyhint="done" autocomplete="off">
+    </label>
+    <div class="field" id="english-field">
+      <label for="node-english">コードで使う名前 (英語・空欄なら自動変換)</label>
+      <input type="text" class="text-input code-input" id="node-english" maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="例: Goblin / move enemy">
+      <p class="kind-hint" id="english-hint"></p>
+    </div>
+    <div class="field">
+      <span id="kind-label">種類</span>
+      <div class="segmented" id="kind-buttons" role="group" aria-labelledby="kind-label"></div>
+      <p class="kind-hint" id="kind-hint"></p>
+    </div>
+    <div class="field" id="inherit-field">
+      <span>継承 (継承元クラス と 継承アクセス)</span>
+      <div class="param-list" id="inherit-list"></div>
+      <button type="button" class="tool-btn add-param" id="add-inherit">＋ 継承元を追加</button>
+    </div>
+    <div class="field" id="flags-field">
+      <span>関数の設定</span>
+      <div class="toggles">
+        <button type="button" class="toggle-btn" id="flag-ctor" aria-pressed="false"><span>コンストラクタ</span><b class="state"></b></button>
+        <button type="button" class="toggle-btn" id="flag-virtual" aria-pressed="false"><span>Virtual</span><b class="state"></b></button>
+        <button type="button" class="toggle-btn" id="flag-override" aria-pressed="false"><span>Override</span><b class="state"></b></button>
+      </div>
+      <p class="kind-hint" id="flags-hint"></p>
+    </div>
+    <div class="field" id="access-field">
+      <span id="access-label">アクセス</span>
+      <div class="segmented" id="access-buttons" role="group" aria-labelledby="access-label"></div>
+    </div>
+    <div class="field" id="type-field">
+      <label for="node-type" id="type-label">型</label>
+      <input type="text" class="text-input code-input" id="node-type" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="chips" id="type-chips"></div>
+    </div>
+    <div class="field" id="params-field">
+      <span>引数</span>
+      <div class="param-list" id="param-list"></div>
+      <button type="button" class="tool-btn add-param" id="add-param">＋ 引数を追加</button>
+    </div>
+    <p class="error" id="node-error" hidden></p>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="node-cancel">キャンセル</button>
+      <button type="submit" class="btn-primary">完了</button>
+    </div>
+  </form>
+</div>
+
+<!-- プロジェクト名の入力 (新規作成・名前変更で使い回す) -->
+<div class="overlay top" id="name-dialog" hidden>
+  <form class="dialog" id="name-form" role="dialog" aria-modal="true" aria-labelledby="name-title">
+    <h2 id="name-title"></h2>
+    <label class="field" for="project-input">プロジェクト名
+      <input type="text" class="text-input" id="project-input" maxlength="60" enterkeyhint="done" autocomplete="off">
+    </label>
+    <p class="error" id="name-error" hidden></p>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="name-cancel">キャンセル</button>
+      <button type="submit" class="btn-primary" id="name-ok"></button>
+    </div>
+  </form>
+</div>
+
+<!-- プロジェクトの操作メニュー (⋯ ボタンで開く) -->
+<div class="overlay" id="menu-dialog" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+    <h2 class="sheet-title" id="menu-title"></h2>
+    <div class="sheet-buttons">
+      <button type="button" class="sheet-btn" id="menu-open"><span class="icon">▶</span>開く</button>
+      <button type="button" class="sheet-btn" id="menu-rename"><span class="icon">✎</span>名前を変更</button>
+      <button type="button" class="sheet-btn" id="menu-duplicate"><span class="icon">⧉</span>複製</button>
+      <button type="button" class="sheet-btn danger" id="menu-delete"><span class="icon">×</span>削除</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" class="btn-cancel" id="menu-cancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+// =====================================================================
+// コード生成エンジン
+//
+// 画面とは関係なく「ツリー → コードの文字列」だけを担当する独立した部品です。
+//
+// 流れ:
+//   1. NameConverter … ノード名(日本語) → 関数名に使える英単語の列
+//   2. buildModel    … ツリー → 言語に関係ない「コードの設計図(モデル)」
+//   3. renderCode    … モデル → 各言語のコード文字列
+//
+// 将来の拡張について:
+//   - 引数・戻り値: モデルの関数に params / returnType を足し、各言語の functionStart で使う
+//   - 条件分岐・ループ・変数: 関数の body に { type: "if" } などの「文」を足し、
+//     各言語の statements に書き方を追加する (今は { type: "call" } だけ)
+//   - 新しい言語: CodeGen.languages に1つ追加する
+//   - AI生成: buildModel の結果をもとに、別の関数で中身を作る
+// =====================================================================
+const CodeGen = (function () {
+
+  // -------------------------------------------------------------
+  // 1. 名前の変換
+  // -------------------------------------------------------------
+
+  // 名詞 (もの・場所・データ)
+  const NOUN_WORDS = {
+    "ゲームオーバー": "game over", "ゲームクリア": "game clear", "ゲーム": "game",
+    "プレイヤー": "player", "プレーヤー": "player", "主人公": "hero", "キャラクター": "character", "キャラ": "character",
+    "敵キャラ": "enemy", "敵": "enemy", "ボス": "boss", "味方": "ally", "仲間": "party", "モンスター": "monster",
+    "アイテム": "item", "武器": "weapon", "防具": "armor", "装備": "equipment", "宝箱": "treasure chest",
+    "弾": "bullet", "ボール": "ball", "球": "ball", "ブロック": "block", "ピース": "piece", "パズル": "puzzle",
+    "カード": "card", "手札": "hand", "山札": "deck", "デッキ": "deck", "盤面": "board", "盤": "board", "マス": "cell",
+    "マップ": "map", "地図": "map", "ステージ": "stage", "フィールド": "field", "背景": "background", "壁": "wall", "床": "floor", "地面": "ground",
+    "ハイスコア": "high score", "スコア": "score", "得点": "score", "点数": "score",
+    "体力": "hp", "ライフ": "life", "残機": "lives", "経験値": "exp", "ダメージ": "damage", "魔法": "magic", "スキル": "skill",
+    "お金": "money", "所持金": "money", "ショップ": "shop", "お店": "shop", "店": "shop",
+    "戦闘": "battle", "バトル": "battle", "ターン": "turn", "イベント": "event", "ミッション": "mission", "クエスト": "quest",
+    "レベル": "level", "時間": "time", "タイマー": "timer", "制限時間": "time limit",
+    "画面": "screen", "メニュー": "menu", "タイトル": "title", "結果": "result", "リザルト": "result", "ランキング": "ranking",
+    "ボタン": "button", "キー": "key", "キーボード": "keyboard", "マウス": "mouse", "タッチ": "touch", "コントローラー": "controller",
+    "音": "sound", "サウンド": "sound", "効果音": "sound effect", "音楽": "music", "画像": "image", "アニメーション": "animation", "エフェクト": "effect",
+    "カメラ": "camera", "位置": "position", "座標": "position", "速度": "speed", "スピード": "speed", "向き": "direction", "方向": "direction",
+    "角度": "angle", "重力": "gravity", "物理": "physics", "当たり判定": "collision", "衝突": "collision",
+    "状態": "state", "ステータス": "status", "設定": "settings", "オプション": "options", "データ": "data", "ファイル": "file",
+    "ユーザー": "user", "名前": "name", "パスワード": "password", "一覧": "list", "リスト": "list", "履歴": "history",
+    "合計": "total", "平均": "average", "最大": "max", "最小": "min", "個数": "count", "回数": "count", "数": "count", "値": "value",
+    "数字": "number", "乱数": "random number", "ランダム": "random", "文字": "text", "文章": "text", "テキスト": "text", "メッセージ": "message",
+    "問題": "question", "答え": "answer", "正解": "correct", "不正解": "incorrect", "点": "point",
+    "学校": "school", "課題": "assignment", "資料": "document", "プレゼン": "presentation", "スライド": "slide", "レポート": "report",
+    "表": "table", "グラフ": "graph", "日付": "date", "天気": "weather", "ログ": "log", "エラー": "error",
+    "メイン": "main", "全体": "all", "次": "next", "前": "previous", "最初": "first", "最後": "last",
+    "上": "up", "下": "down", "左": "left", "右": "right", "システム": "system", "ルール": "rule", "管理": "manager",
+    "威力": "power", "攻撃力": "attack power", "防御力": "defense", "力": "power", "量": "amount", "移動量": "move amount",
+    "名前空間": "namespace", "マネージャー": "manager", "コントローラー": "controller"
+  };
+
+  // 動詞 (する こと)。「〇〇処理」の 処理 は、動詞のあとなら省略する
+  const VERB_WORDS = {
+    "移動": "move", "動かす": "move", "動く": "move", "歩く": "walk", "走る": "run", "ダッシュ": "dash",
+    "ジャンプ": "jump", "跳ぶ": "jump", "飛ぶ": "fly", "落下": "fall", "落ちる": "fall", "着地": "land",
+    "攻撃": "attack", "防御": "defend", "回避": "dodge", "避ける": "dodge", "撃つ": "shoot", "射撃": "shoot", "発射": "fire", "投げる": "throw",
+    "倒す": "defeat", "勝つ": "win", "勝利": "win", "負ける": "lose", "敗北": "lose", "回復": "heal", "死ぬ": "die",
+    "出現": "spawn", "登場": "appear", "生成": "create", "作成": "create", "作る": "create", "追加": "add", "削除": "delete", "消す": "remove", "消える": "disappear",
+    "表示": "show", "描画": "draw", "描く": "draw", "隠す": "hide", "非表示": "hide",
+    "更新": "update", "初期化": "initialize", "準備": "prepare", "開始": "start", "始める": "start", "スタート": "start",
+    "終了": "end", "終わる": "end", "停止": "stop", "止める": "stop", "止まる": "stop", "一時停止": "pause", "ポーズ": "pause", "再開": "resume",
+    "判定": "check", "確認": "check", "チェック": "check", "調べる": "check", "計算": "calculate", "集計": "total up",
+    "加算": "add", "足す": "add", "減算": "subtract", "引く": "subtract", "増やす": "increase", "減らす": "decrease", "掛ける": "multiply", "割る": "divide",
+    "拾う": "pick up", "取得": "get", "取る": "get", "使う": "use", "使用": "use", "選ぶ": "select", "選択": "select", "決定": "decide", "押す": "press",
+    "読み込み": "load", "読み込む": "load", "書き込み": "write", "書き込む": "write", "保存": "save", "セーブ": "save", "ロード": "load",
+    "送る": "send", "送信": "send", "受け取る": "receive", "受信": "receive", "入力": "input", "出力": "output",
+    "再生": "play", "鳴らす": "play", "切り替え": "switch", "切り替える": "switch", "切替": "switch", "変更": "change", "変える": "change",
+    "待つ": "wait", "待機": "wait", "探す": "search", "検索": "search", "並べる": "arrange", "並べ替え": "sort", "並び替え": "sort", "ソート": "sort",
+    "比べる": "compare", "比較": "compare", "数える": "count", "採点": "grade", "出題": "ask", "答える": "answer", "回答": "answer",
+    "進む": "advance", "戻る": "go back", "戻す": "restore", "開く": "open", "開ける": "open", "閉じる": "close",
+    "回転": "rotate", "回す": "rotate", "追いかける": "chase", "追う": "chase", "逃げる": "escape",
+    "当たる": "hit", "ぶつかる": "collide", "跳ね返る": "bounce", "反射": "reflect", "加速": "accelerate", "減速": "decelerate",
+    "登録": "register", "ログイン": "login", "印刷": "print", "まとめる": "summarize", "調査": "research", "発表": "present",
+    "書く": "write", "読む": "read", "見る": "view", "聞く": "listen", "話す": "talk", "会話": "talk",
+    "買う": "buy", "購入": "buy", "売る": "sell", "販売": "sell", "育てる": "grow", "成長": "grow", "レベルアップ": "level up",
+    "揃える": "match", "落とす": "drop", "ドロップ": "drop", "遷移": "transition", "合体": "merge", "設置": "place", "置く": "place"
+  };
+
+
+  // ---- 追加の辞書 (ローマ字読みを減らして、英語の名前にするため) ----
+  // すでにある言葉は上書きしない (これまでの変換結果は変わらない)
+  const MORE_NOUNS = {
+    // キャラクター・モンスター
+    "勇者": "hero", "戦士": "warrior", "剣士": "swordsman", "魔法使い": "wizard", "魔術師": "mage", "僧侶": "priest",
+    "盗賊": "thief", "騎士": "knight", "弓使い": "archer", "村人": "villager", "商人": "merchant", "王様": "king", "王": "king",
+    "姫": "princess", "女王": "queen", "魔王": "demon king", "魔物": "monster", "怪物": "monster", "竜": "dragon", "龍": "dragon",
+    "ゴブリン": "goblin", "スライム": "slime", "ドラゴン": "dragon", "オーク": "orc", "ゾンビ": "zombie", "スケルトン": "skeleton",
+    "ゴースト": "ghost", "幽霊": "ghost", "ウルフ": "wolf", "狼": "wolf", "コウモリ": "bat", "クモ": "spider", "ヘビ": "snake",
+    "ナイト": "knight", "ウィザード": "wizard", "アーチャー": "archer", "ヒーロー": "hero", "ヒロイン": "heroine", "ペット": "pet",
+    "ミニボス": "mini boss", "ラスボス": "final boss", "中ボス": "mid boss", "雑魚": "minion", "ザコ": "minion", "NPC": "npc",
+    "犬": "dog", "猫": "cat", "鳥": "bird", "魚": "fish", "虫": "bug", "獣": "beast", "人": "person", "人間": "human",
+    // 装備・アイテム
+    "剣": "sword", "ソード": "sword", "盾": "shield", "シールド": "shield", "弓": "bow", "矢": "arrow", "杖": "staff", "槍": "spear",
+    "斧": "axe", "鎧": "armor", "兜": "helmet", "アーマー": "armor", "ヘルメット": "helmet", "指輪": "ring", "リング": "ring",
+    "薬": "potion", "ポーション": "potion", "回復薬": "potion", "エリクサー": "elixir", "鍵": "key", "カギ": "key",
+    "宝": "treasure", "宝物": "treasure", "宝石": "gem", "ジェム": "gem", "コイン": "coin", "ゴールド": "gold", "金": "gold",
+    "銀": "silver", "クリスタル": "crystal", "爆弾": "bomb", "ボム": "bomb", "ミサイル": "missile", "レーザー": "laser",
+    "ビーム": "beam", "ショット": "shot", "銃": "gun", "ガン": "gun", "ハンマー": "hammer", "ナイフ": "knife", "ロープ": "rope",
+    "地図データ": "map data", "インベントリ": "inventory", "持ち物": "inventory", "所持品": "inventory", "アイテム欄": "item slot",
+    "スロット": "slot", "ストレージ": "storage", "倉庫": "warehouse", "素材": "material", "レシピ": "recipe",
+    // 場所・地形
+    "城": "castle", "キャッスル": "castle", "村": "village", "町": "town", "街": "town", "都市": "city", "国": "country",
+    "森": "forest", "洞窟": "cave", "山": "mountain", "川": "river", "海": "sea", "湖": "lake", "空": "sky", "島": "island",
+    "砂漠": "desert", "草原": "field", "道": "road", "橋": "bridge", "家": "house", "部屋": "room", "塔": "tower", "タワー": "tower",
+    "ダンジョン": "dungeon", "迷路": "maze", "迷宮": "labyrinth", "階段": "stairs", "扉": "door", "ドア": "door", "門": "gate",
+    "ゲート": "gate", "宝箱": "treasure chest", "チェスト": "chest", "トラップ": "trap", "罠": "trap", "スイッチ": "switch",
+    "レバー": "lever", "ゴール": "goal", "スタート地点": "start point", "チェックポイント": "checkpoint", "セーブポイント": "save point",
+    "ワールド": "world", "世界": "world", "エリア": "area", "ゾーン": "zone", "レーン": "lane", "コース": "course",
+    "タイル": "tile", "グリッド": "grid", "セル": "cell", "床面": "floor", "天井": "ceiling", "足場": "platform",
+    "プラットフォーム": "platform", "障害物": "obstacle", "ブロック崩し": "breakout", "パドル": "paddle", "ラケット": "racket",
+    // 属性・状態・数値
+    "火": "fire", "炎": "fire", "水": "water", "氷": "ice", "雷": "thunder", "風": "wind", "土": "earth", "光": "light", "闇": "dark",
+    "毒": "poison", "麻痺": "paralysis", "睡眠": "sleep", "状態異常": "status effect", "属性": "element", "弱点": "weakness",
+    "経験": "experience", "能力": "ability", "体力最大値": "max hp", "最大体力": "max hp", "魔力": "mp", "MP": "mp",
+    "スタミナ": "stamina", "攻撃範囲": "attack range", "射程": "range", "範囲": "range", "距離": "distance", "確率": "probability",
+    "倍率": "multiplier", "コンボ": "combo", "スコア倍率": "score multiplier", "ボーナス": "bonus", "ペナルティ": "penalty",
+    "ランク": "rank", "順位": "rank", "勝敗": "result", "勝者": "winner", "敗者": "loser", "引き分け": "draw",
+    "生存": "alive", "死亡": "dead", "無敵": "invincible", "無敵時間": "invincible time", "クールタイム": "cooldown",
+    "クールダウン": "cooldown", "ゲージ": "gauge", "バー": "bar", "HPバー": "hp bar", "メーター": "meter",
+    // 画面・UI
+    "ウィンドウ": "window", "ダイアログ": "dialog", "ポップアップ": "popup", "アイコン": "icon", "ラベル": "label",
+    "テキストボックス": "text box", "入力欄": "input field", "チェックボックス": "checkbox", "スライダー": "slider",
+    "タブ": "tab", "ページ": "page", "ヘッダー": "header", "フッター": "footer", "カーソル": "cursor", "ポインター": "pointer",
+    "フォント": "font", "色": "color", "カラー": "color", "背景色": "background color", "透明度": "alpha", "明るさ": "brightness",
+    "幅": "width", "高さ": "height", "大きさ": "size", "サイズ": "size", "縦": "vertical", "横": "horizontal", "中心": "center",
+    "中央": "center", "端": "edge", "左上": "top left", "右下": "bottom right", "全画面": "fullscreen", "フルスクリーン": "fullscreen",
+    "ミニマップ": "minimap", "レーダー": "radar", "チュートリアル": "tutorial", "ヘルプ": "help", "クレジット": "credits",
+    "エンディング": "ending", "オープニング": "opening", "ムービー": "movie", "シーン": "scene", "ステート": "state",
+    "フェード": "fade", "トランジション": "transition", "アニメ": "animation", "スプライト": "sprite", "テクスチャ": "texture",
+    "モデル": "model", "メッシュ": "mesh", "パーティクル": "particle", "ライト": "light", "シャドウ": "shadow", "影": "shadow",
+    "UI": "ui", "HUD": "hud", "GUI": "gui", "メニュー画面": "menu screen", "タイトル画面": "title screen",
+    "設定画面": "settings screen", "結果画面": "result screen", "ゲーム画面": "game screen", "ロード画面": "loading screen",
+    // 入力・音
+    "ジョイスティック": "joystick", "スティック": "stick", "ゲームパッド": "gamepad", "パッド": "pad", "十字キー": "dpad",
+    "スワイプ": "swipe", "タップ": "tap", "クリック": "click", "ドラッグ": "drag", "長押し": "long press",
+    "BGM": "bgm", "SE": "se", "音量": "volume", "ボリューム": "volume", "ミュート": "mute", "ボイス": "voice", "声": "voice",
+    // データ・プログラム
+    "配列": "array", "リスト構造": "list", "変数": "variable", "定数": "constant", "関数": "function", "引数": "argument",
+    "戻り値": "return value", "条件": "condition", "分岐": "branch", "繰り返し": "loop", "初期値": "initial value",
+    "最大値": "max value", "最小値": "min value", "合計値": "total", "平均値": "average", "文字列": "string", "整数": "integer",
+    "小数": "decimal", "フラグ": "flag", "カウンター": "counter", "カウント": "count", "インデックス": "index", "番号": "number",
+    "ID": "id", "キュー": "queue", "スタック": "stack", "マップデータ": "map data", "テーブル": "table", "レコード": "record",
+    "ファイル名": "file name", "パス": "path", "URL": "url", "サーバー": "server", "クライアント": "client", "ネットワーク": "network",
+    "通信": "communication", "接続": "connection", "データベース": "database", "キャッシュ": "cache", "バッファ": "buffer",
+    "イベントハンドラ": "event handler", "コールバック": "callback", "タスク": "task", "ジョブ": "job", "スレッド": "thread",
+    "フレーム": "frame", "秒": "seconds", "ミリ秒": "milliseconds", "経過時間": "elapsed time", "待ち時間": "wait time",
+    "間隔": "interval", "時刻": "time", "日時": "datetime", "期限": "deadline", "締め切り": "deadline",
+    "加速度": "acceleration", "速さ": "speed", "向きベクトル": "direction vector", "ベクトル": "vector", "回転角": "rotation",
+    "座標系": "coordinate system", "当たり": "hit", "ヒット": "hit", "コライダー": "collider", "リジッドボディ": "rigidbody",
+    // アプリ・サービス
+    "アカウント": "account", "プロフィール": "profile", "メール": "mail", "メールアドレス": "email address", "電話番号": "phone number",
+    "住所": "address", "通知": "notification", "お知らせ": "notice", "メモ": "memo", "ノート": "note", "日記": "diary",
+    "カレンダー": "calendar", "予定": "schedule", "スケジュール": "schedule", "タスク一覧": "task list", "やること": "todo",
+    "買い物": "shopping", "カート": "cart", "注文": "order", "商品": "product", "価格": "price", "値段": "price", "在庫": "stock",
+    "支払い": "payment", "レシート": "receipt", "会員": "member", "ユーザー名": "user name", "コメント": "comment",
+    "投稿": "post", "記事": "article", "写真": "photo", "動画": "video", "チャット": "chat", "トーク": "talk", "友達": "friend",
+    "フレンド": "friend", "グループ": "group", "チーム": "team", "メンバー": "member", "管理者": "admin", "ゲスト": "guest",
+    // 学校・勉強
+    "宿題": "homework", "授業": "lesson", "時間割": "timetable", "テスト": "test", "試験": "exam", "成績": "grade",
+    "出席": "attendance", "生徒": "student", "学生": "student", "先生": "teacher", "教科": "subject", "数学": "math",
+    "英語": "english", "国語": "japanese", "理科": "science", "社会": "social studies", "算数": "arithmetic", "クラス名簿": "class roster",
+    "名簿": "roster", "クイズ": "quiz", "単語": "word", "単語帳": "flashcards", "暗記": "memorization", "復習": "review",
+    "予習": "preparation", "目標": "goal", "進捗": "progress", "まとめ": "summary", "感想": "impression", "グラフ表示": "graph view",
+    // その他
+    "ゲームループ": "game loop", "メインループ": "main loop", "シーン管理": "scene manager", "入力管理": "input manager",
+    "音声": "audio", "オーディオ": "audio", "セーブデータ": "save data", "ロードデータ": "load data", "オプション画面": "options screen",
+    "難易度": "difficulty", "モード": "mode", "ステージ選択": "stage select", "キャラ選択": "character select",
+    "ハイスコア表": "high score table", "ランキング表": "ranking table", "残り時間": "remaining time", "残り": "remaining",
+    "現在": "current", "前回": "last", "次回": "next", "全部": "all", "全て": "all", "一つ": "one", "複数": "multiple",
+    "新規": "new", "古い": "old", "新しい": "new", "最新": "latest", "自分": "self", "相手": "opponent", "対戦": "versus",
+    "ガチャ": "gacha", "協力": "coop", "オンライン": "online", "オフライン": "offline", "ローカル": "local", "マルチ": "multi", "ソロ": "solo"
+  };
+  const MORE_VERBS = {
+    "体当たり": "tackle", "突進": "charge", "噛みつく": "bite", "引っかく": "scratch", "殴る": "punch", "蹴る": "kick",
+    "電撃": "electric shock", "必殺技": "special move", "連続攻撃": "combo attack", "溜め攻撃": "charge attack",
+    "向かう": "go to", "着く": "arrive", "到着": "arrive", "行く": "go", "来る": "come", "帰る": "return", "入る": "enter", "出る": "exit", "乗る": "ride",
+    "降りる": "get off", "登る": "climb", "泳ぐ": "swim", "飛び越える": "jump over", "しゃがむ": "crouch", "滑る": "slide",
+    "集める": "collect", "収集": "collect", "配る": "deal", "混ぜる": "shuffle", "シャッフル": "shuffle", "引き直す": "redraw",
+    "破棄": "destroy", "破壊": "destroy", "壊す": "break", "壊れる": "break", "光る": "glow", "点滅": "blink", "揺れる": "shake",
+    "揺らす": "shake", "鳴る": "ring", "加える": "add", "取り除く": "remove", "入れ替える": "swap", "交換": "swap",
+    "拡大": "zoom in", "縮小": "zoom out", "復活": "revive", "蘇生": "revive", "召喚": "summon", "装備": "equip", "外す": "unequip",
+    "合成": "craft", "強化": "upgrade", "進化": "evolve", "学ぶ": "learn", "覚える": "learn", "忘れる": "forget",
+    "狙う": "aim", "照準": "aim", "反撃": "counter attack", "ガード": "guard", "ブロック": "block", "パリィ": "parry",
+    "回る": "spin", "転がる": "roll", "跳ねる": "bounce", "弾む": "bounce", "爆発": "explode", "燃える": "burn", "凍る": "freeze",
+    "溶ける": "melt", "倒れる": "fall down", "逃す": "miss", "外れる": "miss", "命中": "hit", "当てる": "hit",
+    "スポーン": "spawn", "リスポーン": "respawn", "生まれる": "spawn", "消滅": "vanish", "退場": "exit", "登録する": "register",
+    "ログアウト": "logout", "サインイン": "sign in", "サインアップ": "sign up", "サインアウト": "sign out", "認証": "authenticate",
+    "表示する": "show", "非表示にする": "hide", "切り替わる": "switch", "移る": "move", "移す": "move", "動かせる": "move",
+    "操作": "control", "操作する": "control", "制御": "control", "管理する": "manage", "監視": "monitor", "記録": "record",
+    "記録する": "record", "保存する": "save", "読み込みする": "load", "更新する": "update", "削除する": "delete", "追加する": "add",
+    "編集": "edit", "編集する": "edit", "複製": "duplicate", "コピー": "copy", "貼り付け": "paste", "ペースト": "paste",
+    "共有": "share", "送信する": "send", "受信する": "receive", "通知する": "notify", "知らせる": "notify", "確定": "confirm",
+    "キャンセル": "cancel", "取り消す": "cancel", "戻す": "undo", "やり直す": "redo", "リセット": "reset", "初期化する": "initialize",
+    "計測": "measure", "測る": "measure", "数える": "count", "集計する": "total up", "並び替える": "sort", "分ける": "split",
+    "まとめる": "group", "結合": "join", "分割": "split", "変換": "convert", "変換する": "convert", "解析": "parse", "生成する": "generate",
+    "描画する": "draw", "再生する": "play", "停止する": "stop", "一時停止する": "pause", "再開する": "resume", "終了する": "quit",
+    "開始する": "start", "始まる": "begin", "終わらせる": "finish", "クリアする": "clear", "失敗": "fail", "成功": "succeed",
+    "判定する": "check", "確認する": "check", "調べ学習": "research", "調査する": "research", "提出": "submit", "提出する": "submit",
+    "採点する": "grade", "答え合わせ": "check answer", "出題する": "ask", "解く": "solve", "考える": "think", "選択する": "select",
+    "決める": "decide", "入力する": "input", "出力する": "output", "印刷する": "print", "表示切替": "toggle view", "開閉": "toggle",
+    "待機する": "wait", "待つ": "wait", "探索": "explore", "探検": "explore", "冒険": "adventure", "戦う": "fight", "戦闘する": "battle",
+    "購入する": "buy", "売却": "sell", "販売する": "sell", "使用する": "use", "消費": "consume", "獲得": "gain", "得る": "gain",
+    "失う": "lose", "減る": "decrease", "増える": "increase", "上がる": "rise", "下がる": "fall", "上げる": "raise", "下げる": "lower"
+  };
+  for (const k of Object.keys(MORE_NOUNS)) if (!NOUN_WORDS[k] && !VERB_WORDS[k]) NOUN_WORDS[k] = MORE_NOUNS[k];
+  for (const k of Object.keys(MORE_VERBS)) if (!NOUN_WORDS[k] && !VERB_WORDS[k]) VERB_WORDS[k] = MORE_VERBS[k];
+
+  // 文をつなぐ言葉。名前からは取り除く
+  const PARTICLES = ["させます", "させる", "される", "します", "する", "から", "まで", "より", "を", "の", "に", "へ", "で", "と", "が", "は", "や", "も"];
+
+  // カタカナ → ローマ字 (辞書にないカタカナ語用)
+  const KANA = {
+    "ア":"a","イ":"i","ウ":"u","エ":"e","オ":"o","カ":"ka","キ":"ki","ク":"ku","ケ":"ke","コ":"ko",
+    "サ":"sa","シ":"shi","ス":"su","セ":"se","ソ":"so","タ":"ta","チ":"chi","ツ":"tsu","テ":"te","ト":"to",
+    "ナ":"na","ニ":"ni","ヌ":"nu","ネ":"ne","ノ":"no","ハ":"ha","ヒ":"hi","フ":"fu","ヘ":"he","ホ":"ho",
+    "マ":"ma","ミ":"mi","ム":"mu","メ":"me","モ":"mo","ヤ":"ya","ユ":"yu","ヨ":"yo",
+    "ラ":"ra","リ":"ri","ル":"ru","レ":"re","ロ":"ro","ワ":"wa","ヲ":"o","ン":"n",
+    "ガ":"ga","ギ":"gi","グ":"gu","ゲ":"ge","ゴ":"go","ザ":"za","ジ":"ji","ズ":"zu","ゼ":"ze","ゾ":"zo",
+    "ダ":"da","ヂ":"ji","ヅ":"zu","デ":"de","ド":"do","バ":"ba","ビ":"bi","ブ":"bu","ベ":"be","ボ":"bo",
+    "パ":"pa","ピ":"pi","プ":"pu","ペ":"pe","ポ":"po","ヴ":"vu",
+    "ァ":"a","ィ":"i","ゥ":"u","ェ":"e","ォ":"o","ャ":"ya","ュ":"yu","ョ":"yo"
+  };
+  const KANA_PAIRS = {
+    "キャ":"kya","キュ":"kyu","キョ":"kyo","シャ":"sha","シュ":"shu","ショ":"sho","チャ":"cha","チュ":"chu","チョ":"cho",
+    "ニャ":"nya","ニュ":"nyu","ニョ":"nyo","ヒャ":"hya","ヒュ":"hyu","ヒョ":"hyo","ミャ":"mya","ミュ":"myu","ミョ":"myo",
+    "リャ":"rya","リュ":"ryu","リョ":"ryo","ギャ":"gya","ギュ":"gyu","ギョ":"gyo","ジャ":"ja","ジュ":"ju","ジョ":"jo",
+    "ビャ":"bya","ビュ":"byu","ビョ":"byo","ピャ":"pya","ピュ":"pyu","ピョ":"pyo",
+    "ファ":"fa","フィ":"fi","フェ":"fe","フォ":"fo","ティ":"ti","ディ":"di","トゥ":"tu","ドゥ":"du",
+    "ウィ":"wi","ウェ":"we","ウォ":"wo","シェ":"she","ジェ":"je","チェ":"che","ヴァ":"va","ヴィ":"vi","ヴェ":"ve","ヴォ":"vo"
+  };
+
+  function romanize(katakana) {
+    let out = "";
+    let doubleNext = false;
+    for (let i = 0; i < katakana.length; i++) {
+      const ch = katakana[i];
+      if (ch === "ッ") { doubleNext = true; continue; }
+      if (ch === "ー") continue;
+      let roma = KANA_PAIRS[katakana.slice(i, i + 2)];
+      if (roma) i++;
+      else roma = KANA[ch] || "";
+      if (doubleNext && roma) roma = roma[0] + roma;
+      doubleNext = false;
+      out += roma;
+    }
+    return out;
+  }
+
+  const DICT_KEYS = Object.keys(NOUN_WORDS).concat(Object.keys(VERB_WORDS));
+  const MAX_KEY_LENGTH = Math.max.apply(null, DICT_KEYS.map(function (k) { return k.length; }));
+
+  // 名前を「言葉」に分ける (辞書の一番長い一致を優先)
+  function tokenize(text) {
+    const tokens = [];
+    let katakanaBuffer = "";
+    let i = 0;
+
+    function flushKatakana() {
+      if (katakanaBuffer) tokens.push({ type: "noun", words: [romanize(katakanaBuffer)], romanized: true });
+      katakanaBuffer = "";
+    }
+
+    while (i < text.length) {
+      // 辞書
+      let matched = false;
+      for (let len = Math.min(MAX_KEY_LENGTH, text.length - i); len >= 1; len--) {
+        const piece = text.slice(i, i + len);
+        if (piece === "処理") {
+          flushKatakana();
+          tokens.push({ type: "process", words: ["process"] });
+        } else if (VERB_WORDS[piece]) {
+          flushKatakana();
+          tokens.push({ type: "verb", words: VERB_WORDS[piece].split(" ") });
+        } else if (NOUN_WORDS[piece]) {
+          flushKatakana();
+          tokens.push({ type: "noun", words: NOUN_WORDS[piece].split(" ") });
+        } else {
+          continue;
+        }
+        i += len;
+        matched = true;
+        break;
+      }
+      if (matched) continue;
+
+      // 英数字はそのまま使う (例: HP, UI, Stage2, playerMove)
+      const ascii = text.slice(i).match(/^[A-Za-z0-9]+/);
+      if (ascii) {
+        flushKatakana();
+        const words = ascii[0].replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(" ");
+        tokens.push({ type: "noun", words: words });
+        i += ascii[0].length;
+        continue;
+      }
+
+      // 助詞など
+      const particle = PARTICLES.find(function (p) { return text.startsWith(p, i); });
+      if (particle) {
+        flushKatakana();
+        tokens.push({ type: "particle", words: [] });
+        i += particle.length;
+        continue;
+      }
+
+      const ch = text[i];
+      if (/[ァ-ヴー]/.test(ch)) {           // 辞書にないカタカナ → ローマ字にする
+        katakanaBuffer += ch;
+      } else if (/[\s_\-・、。,.!?！？「」()（）]/.test(ch)) { // 区切り文字は無視
+        flushKatakana();
+      } else {
+        flushKatakana();
+        tokens.push({ type: "unknown", words: [] }); // 変換できない文字(辞書にない漢字など)
+      }
+      i++;
+    }
+    flushKatakana();
+    return tokens;
+  }
+
+  // ノード名 → 英単語の列。変換できなければ null
+  function nameToWords(name) {
+    return nameInfo(name).words;
+  }
+
+  // ノード名 → { words: 英単語の列 (変換できなければ null), romanized: 辞書になくローマ字にした部分があるか }
+  function nameInfo(name) {
+    const text = (name || "").normalize("NFKC").trim();
+    let tokens = tokenize(text);
+    const romanized = tokens.some(function (t) { return t.romanized; });
+    return { words: tokensToWords(tokens), romanized: romanized };
+  }
+
+  function tokensToWords(tokens) {
+    if (tokens.some(function (t) { return t.type === "unknown"; })) return null;
+
+    tokens = tokens.filter(function (t) { return t.type !== "particle"; });
+    if (tokens.length === 0) return null;
+
+    // 「移動処理」のように動詞のあとの「処理」は省略 → move
+    const last = tokens[tokens.length - 1];
+    if (last.type === "process" && tokens.length >= 2 && tokens[tokens.length - 2].type === "verb") {
+      tokens.pop();
+    }
+
+    // 最後が動詞なら先頭に出す: 敵を動かす → move enemy
+    const end = tokens[tokens.length - 1];
+    if (end.type === "verb" && tokens.length >= 2) {
+      tokens.pop();
+      tokens.unshift(end);
+    }
+
+    const words = [];
+    for (const t of tokens) {
+      for (const w of t.words) if (w) words.push(w);
+    }
+    return words.length > 0 ? words : null;
+  }
+
+  // 英単語の列を、指定した書き方の名前にする
+  const STYLES = {
+    pascal: { label: "PascalCase (PlayerProcess)" },
+    camel: { label: "camelCase (playerProcess)" },
+    snake: { label: "snake_case (player_process)" }
+  };
+
+  function applyStyle(words, style) {
+    const lower = words.map(function (w) { return w.toLowerCase(); });
+    const cap = function (w) { return w.charAt(0).toUpperCase() + w.slice(1); };
+    if (style === "snake") return lower.join("_");
+    if (style === "camel") return lower[0] + lower.slice(1).map(cap).join("");
+    return lower.map(cap).join("");
+  }
+
+  // -------------------------------------------------------------
+  // 2. ツリー → モデル (言語に関係ない形)
+  // -------------------------------------------------------------
+  // モデル:
+  // {
+  //   title: "RPGゲーム",
+  //   functions: [
+  //     { label: "プレイヤー処理", name: "PlayerProcess", converted: true,
+  //       body: [ { type: "call", name: "Move", label: "移動処理" }, ... ] },
+  //     ...
+  //   ]
+  // }
+  // コードに使う名前: ノードの設定で「コードで使う名前 (英語)」が入っていればそれ、なければノード名
+  function codeNameOf(node) {
+    const english = typeof node.englishName === "string" ? node.englishName.trim() : "";
+    return english !== "" ? english : node.name;
+  }
+
+  // 自動変換の結果を見せるため (設定画面のプレビュー用): "ゴブリンを倒す" → { text: "DefeatGoblin", romanized: false }
+  function previewName(name) {
+    const info = nameInfo(name);
+    if (!info.words) return { text: "", romanized: false, ok: false };
+    return { text: info.words.map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(""), romanized: info.romanized, ok: true };
+  }
+
+  // 英単語の列 → 書き方を当てはめ、数字始まりや予約語を避けた名前にする
+  function wordsToIdentifier(words, style, reserved) {
+    let name = applyStyle(words, style);
+    if (/^[0-9]/.test(name)) name = applyStyle(["func"].concat(words), style);
+    if (reserved.indexOf(name) >= 0) name = applyStyle(words.concat(["process"]), style);
+    return name;
+  }
+
+  // 同じ名前が2回出たら 2, 3 … を付ける
+  function makeUnique(name, used, style) {
+    let unique = name;
+    let n = 2;
+    while (used[unique]) unique = name + (style === "snake" ? "_" : "") + n++;
+    used[unique] = true;
+    return unique;
+  }
+
+  // 変数ノードは「呼び出す処理」ではないので、通常のコード生成では使わない
+  function processChildren(node) {
+    return node.children.filter(function (c) { return c.kind !== "variable"; });
+  }
+
+  function buildModel(tree, options) {
+    const language = LANGUAGES[options.language];
+    const used = {};      // すでに使った関数名
+    const names = {};     // ノードid → 関数名
+    const converted = {}; // ノードid → 変換できたか
+    let fallbackCount = 0;
+
+    // 名前を先に全部決める (上から順に)
+    function decideName(node) {
+      let words = nameToWords(codeNameOf(node));
+      converted[node.id] = words !== null;
+      if (!words) {
+        fallbackCount++;
+        words = ["process", String(fallbackCount)];
+      }
+      names[node.id] = makeUnique(wordsToIdentifier(words, options.style, language.reserved), used, options.style);
+      processChildren(node).forEach(decideName);
+    }
+    decideName(tree);
+
+    // 関数を上から順に並べる (親 → その子 → 孫 … の順)
+    const functions = [];
+    function addFunction(node) {
+      functions.push({
+        label: node.name,
+        name: names[node.id],
+        converted: converted[node.id],
+        body: processChildren(node).map(function (child) {
+          return { type: "call", name: names[child.id], label: child.name };
+        })
+      });
+      processChildren(node).forEach(addFunction);
+    }
+    addFunction(tree);
+
+    return { title: options.title || tree.name, functions: functions };
+  }
+
+  // -------------------------------------------------------------
+  // 3. モデル → 各言語のコード
+  // -------------------------------------------------------------
+  const CPP_RESERVED = ["main", "delete", "new", "switch", "case", "default", "return", "break", "continue", "class", "struct", "public", "private", "protected", "this", "true", "false", "throw", "try", "catch", "operator", "template", "union", "goto", "auto", "int", "float", "double", "char", "bool", "void", "long", "short", "if", "else", "for", "while", "do", "enum", "const", "static", "virtual", "friend", "inline", "namespace", "using", "sizeof", "typedef", "typename", "explicit", "export", "extern", "mutable", "signed", "unsigned", "volatile", "register", "and", "or", "not", "xor"];
+  const CSHARP_RESERVED = ["abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked", "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else", "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock", "long", "namespace", "new", "null", "object", "operator", "out", "override", "params", "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual", "void", "volatile", "while"];
+  const JS_RESERVED = ["break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "let", "new", "null", "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield", "await"];
+
+  // 各言語の書き方。新しい言語はここに追加する
+  const LANGUAGES = {
+    cpp: {
+      label: "C++",
+      defaultStyle: "pascal",
+      reserved: CPP_RESERVED,
+      comment: function (text) { return "// " + text; },
+      // C++ は関数を使う前に宣言が必要なので、最初に宣言を並べる
+      prelude: function (model) {
+        return ["// 関数の宣言 (C++ では、使う前に宣言が必要です)"]
+          .concat(model.functions.map(function (f) { return "void " + f.name + "();"; }))
+          .concat([""]);
+      },
+      functionStart: function (f) { return ["void " + f.name + "()", "{"]; },
+      functionEnd: function () { return ["}"]; },
+      statements: {
+        call: function (s) { return [s.name + "();"]; }
+      }
+    },
+    csharp: {
+      label: "C#",
+      defaultStyle: "pascal",
+      reserved: CSHARP_RESERVED,
+      comment: function (text) { return "// " + text; },
+      prelude: function () { return []; },
+      functionStart: function (f) { return ["void " + f.name + "()", "{"]; },
+      functionEnd: function () { return ["}"]; },
+      statements: {
+        call: function (s) { return [s.name + "();"]; }
+      }
+    },
+    javascript: {
+      label: "JavaScript",
+      defaultStyle: "camel",
+      reserved: JS_RESERVED,
+      comment: function (text) { return "// " + text; },
+      prelude: function () { return []; },
+      functionStart: function (f) { return ["function " + f.name + "() {"]; },
+      functionEnd: function () { return ["}"]; },
+      statements: {
+        call: function (s) { return [s.name + "();"]; }
+      }
+    }
+  };
+
+  const INDENT = "    ";
+
+  function renderCode(model, languageKey) {
+    const lang = LANGUAGES[languageKey];
+    let lines = [
+      lang.comment("「" + model.title + "」の設計ツリーから生成したコードの骨組み"),
+      ""
+    ];
+    lines = lines.concat(lang.prelude(model));
+
+    for (const f of model.functions) {
+      // 元のノード名をコメントで残す
+      lines.push(lang.comment(f.label + (f.converted ? "" : " (英語に変換できなかったので仮の名前です)")));
+      lines = lines.concat(lang.functionStart(f));
+      if (f.body.length === 0) {
+        lines.push(INDENT + lang.comment("TODO: 「" + f.label + "」の中身を書く"));
+      }
+      for (const statement of f.body) {
+        const write = lang.statements[statement.type];
+        for (const line of write(statement)) lines.push(INDENT + line);
+      }
+      lines = lines.concat(lang.functionEnd(f));
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
+
+  // -------------------------------------------------------------
+  // 外から使う関数
+  // -------------------------------------------------------------
+  // options = { language: "cpp" | "csharp" | "javascript", style: "pascal" | "camel" | "snake", title }
+  function generate(tree, options) {
+    const model = buildModel(tree, options);
+    return { code: renderCode(model, options.language), model: model };
+  }
+
+  // =============================================================
+  // 4. C++ の命名規則 (CppNaming)
+  //
+  // 「名前をどう付けるか」だけを担当する部品です。コード生成 (5.) はここに名前を聞くだけなので、
+  // 将来規則を変えられるようにするときは、この部品だけを差し替えれば済みます。
+  // =============================================================
+  const CppNaming = (function () {
+    // C++ の名前として使える文字だけでできているか
+    function isAsciiIdentifier(text) {
+      return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text);
+    }
+
+    // 名前 → 単語の列。英語の名前はアンダーバーや大文字の区切りで分け、日本語は英語に変換する
+    //   player_controller → [player, controller] / getPosition → [get, Position] / HPBar → [HP, Bar]
+    function splitWords(rawName) {
+      const name = (rawName || "").normalize("NFKC").trim();
+      if (isAsciiIdentifier(name)) {
+        return name.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/g) || null;
+      }
+      return nameToWords(name);
+    }
+
+    // 単語の最初を大文字にしてつなげる (アンダーバーなし)。HP のような略語はそのまま
+    function pascal(words) {
+      return words.map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join("");
+    }
+
+    // 最初の単語だけ小文字、あとは単語の最初を大文字
+    function camel(words) {
+      return words[0].toLowerCase() + pascal(words.slice(1));
+    }
+
+    function stripPrefix(rawName, prefix) {
+      const name = (rawName || "").trim();
+      return name.toLowerCase().indexOf(prefix) === 0 && name.length > prefix.length ? name.slice(prefix.length) : name;
+    }
+
+    // 名前を作る共通の手順。数字で始まる・予約語になる場合も安全な名前にする
+    function build(rawName, format, makeFallbackWords) {
+      let words = splitWords(rawName);
+      const converted = words !== null;
+      if (!words) words = makeFallbackWords();
+      let name = format(words);
+      if (/^[0-9]/.test(name)) name = format(["n"].concat(words));
+      if (CPP_RESERVED.indexOf(name) >= 0) name = format(words.concat(["value"]));
+      return { name: name, converted: converted };
+    }
+
+    // 型 → 宣言と同時に入れる初期値 (コンパイルできる値にする)
+    function initialValue(type) {
+      const t = type.replace(/\bconst\b|\bvolatile\b|\bstatic\b|\bmutable\b/g, "").replace(/\s+/g, " ").trim();
+      if (/&$/.test(t)) return null;                      // 参照は宣言と同時に初期化できない
+      if (/\*$/.test(t)) return "nullptr";                // ポインタ
+      if (t === "bool") return "false";
+      if (t === "float") return "-1.0f";
+      if (t === "double") return "-1.0";
+      if (t === "long double") return "-1.0L";
+      if (/^(unsigned |signed )?(char|short|int|long|long long|short int|long int|long long int)$/.test(t) ||
+          /^(unsigned|signed|size_t|std::size_t|u?int(8|16|32|64)_t|std::u?int(8|16|32|64)_t)$/.test(t)) {
+        return "-1";
+      }
+      return "{}"; // クラス・std::string・std::vector など → 空の状態で初期化
+    }
+
+    return {
+      className: function (raw, fb) { return build(raw, pascal, fb); },
+      functionName: function (raw, fb) { return build(raw, pascal, fb); },
+      namespaceName: function (raw, fb) { return build(raw, pascal, fb); },
+      argName: function (raw, fb) {
+        const r = build(stripPrefix(raw, "arg_"), camel, fb);
+        return { name: "arg_" + r.name, converted: r.converted };
+      },
+      memberName: function (raw, fb) {
+        const r = build(stripPrefix(raw, "m_"), camel, fb);
+        return { name: "m_" + r.name, converted: r.converted };
+      },
+      localName: function (raw, fb) { return build(raw, camel, fb); },
+      fileName: function (className) { return className.charAt(0).toUpperCase() + className.slice(1); },
+      initialValue: initialValue,
+      namespaceIndent: "",  // namespace の中の字下げ (今は「なし」)
+      // 画面に表示する規則の一覧
+      rules: [
+        { target: "クラス名", rule: "PascalCase", example: "PlayerController" },
+        { target: "関数名", rule: "PascalCase", example: "GetPosition" },
+        { target: "引数", rule: "arg_ プレフィックス", example: "arg_speed" },
+        { target: "メンバー変数", rule: "m_ プレフィックス + 初期値", example: "int m_hp = -1;" },
+        { target: "ローカル変数", rule: "プレフィックスなし + 初期値", example: "int count = -1;" },
+        { target: "namespace", rule: "PascalCase", example: "PlayerSystem" },
+        { target: "ファイル名", rule: "先頭大文字", example: "Player.h / Player.cpp" }
+      ]
+    };
+  })();
+
+  // =============================================================
+  // 5. C++ クラス生成 (.h / .cpp)
+  //
+  // ノードの種類 (node.kind) を使います:
+  //   "namespace" … namespace になる。中に namespace やクラスを入れられる (入れ子にできる)
+  //   "class"     … class になる。中のノードがメンバになる
+  //   "function"  … メンバ関数。access(アクセス) / type(戻り値) / params(引数) を使う
+  //                  中に関数を入れると呼び出しに、変数を入れるとローカル変数になる
+  //   "variable"  … クラスの直下ならメンバ変数、関数の中ならローカル変数。type(型) を使う
+  //   "group"     … コードにはならない (設定していないノードもグループ扱い)
+  //
+  // モデル:
+  // { classes: [ { name, label, fileName, namespaces: ["Game", "Character"],
+  //                members: [ { kind: "variable", access, type, name, init, label },
+  //                           { kind: "function", access, returnType, params: [{type, name}], name, label,
+  //                             locals: [{ type, name, init }], body: [{ type: "call", name }] } ] } ],
+  //   notices: [ "…" ] }
+  //
+  // 将来の拡張について:
+  //   - 継承: クラスに bases: [{ name, access }] を足し、classBlock の "class X" の後ろに書く
+  //   - クラス間の参照: 今は型の中に他のクラス名があれば、そのヘッダーを #include している (includesFor)
+  //   - 命名規則の変更: CppNaming を差し替える
+  // =============================================================
+  const ACCESS_ORDER = ["public", "protected", "private"];
+  const KIND_LABELS = { namespace: "namespace", class: "クラス", function: "関数", variable: "変数", group: "グループ" };
+
+  function cleanType(type, fallback) {
+    const t = (type || "").replace(/\s+/g, " ").trim();
+    return t === "" ? fallback : t;
+  }
+
+  // 日本語など、元の名前から変わったことをコメントで知らせる必要があるか
+  function needsNote(label, converted) {
+    return !converted || /[^\x00-\x7F]/.test(label);
+  }
+
+  function buildClassModel(tree, naming) {
+    const classes = [];
+    const notices = [];
+    const usedClassNames = {};
+    const counters = {};
+
+    // 変換できなかったときの仮の名前 (Class1, Function1, variable1 …)
+    function fallback(word) {
+      return function () {
+        counters[word] = (counters[word] || 0) + 1;
+        return [word, String(counters[word])];
+      };
+    }
+
+    // ctx = { ns: いまの namespace の列, cls: いまのクラス, fn: いまの関数 }
+    function visit(node, ctx) {
+      const kind = node.kind || "group";
+      const children = function (newCtx) {
+        node.children.forEach(function (child) { visit(child, newCtx); });
+      };
+
+      if (kind === "namespace") {
+        if (ctx.cls) {
+          notices.push("「" + node.name + "」(namespace) はクラスの中にあるので namespace にしていません。C++ ではクラスの中に namespace を作れません。");
+          children(ctx);
+          return;
+        }
+        const ns = naming.namespaceName(codeNameOf(node), fallback("namespace"));
+        children({ ns: ctx.ns.concat([ns.name]), cls: null, fn: null });
+        return;
+      }
+
+      if (kind === "class") {
+        const id = naming.className(codeNameOf(node), fallback("class"));
+        const key = ctx.ns.join("::") + "::";
+        let name = id.name;
+        let n = 2;
+        while (usedClassNames[key + name]) name = id.name + n++;
+        usedClassNames[key + name] = true;
+        const newClass = {
+          name: name, label: node.name, note: needsNote(node.name, id.converted), converted: id.converted,
+          namespaces: ctx.ns.slice(), members: [],
+          nodeId: node.id,
+          // 継承: [{ baseId: 継承元クラスのノードid, access: "public" | "protected" | "private" }] (複数可)
+          rawBases: Array.isArray(node.inheritance) ? node.inheritance : [],
+          bases: []
+        };
+        classes.push(newClass);
+        children({ ns: ctx.ns, cls: newClass, fn: null });
+        return;
+      }
+
+      if (kind === "variable") {
+        const type = cleanType(node.type, "int");
+        if (ctx.fn) { // 関数の中 → ローカル変数
+          const id = naming.localName(codeNameOf(node), fallback("variable"));
+          ctx.fn.locals.push({ type: type, name: id.name, init: naming.initialValue(type), label: node.name, note: needsNote(node.name, id.converted), converted: id.converted });
+        } else if (ctx.cls) { // クラスの直下 → メンバ変数
+          const id = naming.memberName(codeNameOf(node), fallback("variable"));
+          ctx.cls.members.push({
+            kind: "variable", access: ACCESS_ORDER.indexOf(node.access) >= 0 ? node.access : "public",
+            type: type, name: id.name, init: naming.initialValue(type),
+            label: node.name, note: needsNote(node.name, id.converted), converted: id.converted
+          });
+        } else {
+          notices.push("「" + node.name + "」(変数) はクラスの外にあるので生成していません。");
+        }
+        children(ctx);
+        return;
+      }
+
+      if (kind === "function") {
+        if (!ctx.cls) {
+          notices.push("「" + node.name + "」(関数) はクラスの外にあるので生成していません。");
+          children(ctx);
+          return;
+        }
+        const isConstructor = node.isConstructor === true;
+        // コンストラクタの名前は、いつもクラス名と同じ
+        const id = isConstructor ? { name: ctx.cls.name, converted: true } : naming.functionName(codeNameOf(node), fallback("function"));
+        const member = {
+          kind: "function", access: ACCESS_ORDER.indexOf(node.access) >= 0 ? node.access : "public",
+          returnType: cleanType(node.type, "void"),
+          params: (node.params || []).map(function (p) {
+            return { type: cleanType(p.type, "int"), name: naming.argName(p.name, fallback("param")).name };
+          }),
+          name: id.name, label: node.name, note: !isConstructor && needsNote(node.name, id.converted), converted: id.converted,
+          isConstructor: isConstructor,
+          isVirtual: !isConstructor && node.isVirtual === true,
+          isOverride: !isConstructor && node.isOverride === true,
+          locals: [], body: []
+        };
+        ctx.cls.members.push(member);
+        // 設計ツリーでこの関数の下にある関数は「呼び出し」として中に書く
+        if (ctx.fn) ctx.fn.body.push({ type: "call", name: member.name });
+        children({ ns: ctx.ns, cls: ctx.cls, fn: member });
+        return;
+      }
+
+      // グループ: コードにはせず、中だけ調べる
+      children(ctx);
+    }
+    visit(tree, { ns: [], cls: null, fn: null });
+
+    // オーバーロード: 同じ名前の関数は、引数の型が違えば別の関数としてそのまま出す (名前は変えない)。
+    // 引数の型まで同じ宣言が2つあるときは C++ ではエラーになるので、お知らせだけ出す。
+    // 変数は同じ名前が2つあると使えないので、これまで通り 2, 3 … を付ける。
+    for (const c of classes) {
+      const usedSignatures = {};
+      const usedVariables = {};
+      for (const m of c.members) {
+        if (m.kind === "function") {
+          const signature = signatureOf(m);
+          if (usedSignatures[signature] === 1) {
+            notices.push(c.name + " に同じ形の " + signature + " が複数あります。引数の型か数を変えないと C++ ではエラーになります。");
+          }
+          usedSignatures[signature] = (usedSignatures[signature] || 0) + 1;
+        } else {
+          let name = m.name;
+          let n = 2;
+          while (usedVariables[name]) name = m.name + n++;
+          usedVariables[name] = true;
+          m.name = name;
+        }
+      }
+    }
+
+    // ファイル名 (同じ名前のクラスが別の namespace にあるときは namespace 名を前に付ける)
+    const usedFiles = {};
+    for (const c of classes) {
+      let file = naming.fileName(c.name);
+      if (usedFiles[file]) file = naming.fileName(c.namespaces.join("") + c.name);
+      let n = 2;
+      const base = file;
+      while (usedFiles[file]) file = base + n++;
+      usedFiles[file] = true;
+      c.fileName = file;
+    }
+
+    resolveInheritance(classes, notices);
+    checkOverrides(classes, notices);
+    return { classes: classes, notices: notices };
+  }
+
+  // 関数を見分けるための「名前 + 引数の型」(例: Move(int,float))
+  function signatureOf(f) {
+    return f.name + "(" + f.params.map(function (p) { return p.type; }).join(", ") + ")";
+  }
+
+  // 継承元のノードid → 生成するクラス。namespace が違うときは Game::Character のように書く
+  function resolveInheritance(classes, notices) {
+    const byNodeId = {};
+    for (const c of classes) byNodeId[c.nodeId] = c;
+    for (const c of classes) {
+      for (const raw of c.rawBases) {
+        const base = raw ? byNodeId[raw.baseId] : null;
+        if (!base) {
+          notices.push(c.name + " の継承元が見つかりません (削除されたか、クラスではなくなっています)。");
+          continue;
+        }
+        if (base === c) continue;
+        if (c.bases.some(function (b) { return b.cls === base; })) continue;
+        c.bases.push({
+          cls: base,
+          access: ACCESS_ORDER.indexOf(raw.access) >= 0 ? raw.access : "public",
+          // 同じ namespace なら名前だけ、違えば namespace から書く
+          qualifiedName: base.namespaces.join("::") === c.namespaces.join("::") || base.namespaces.length === 0
+            ? base.name : base.namespaces.concat([base.name]).join("::")
+        });
+      }
+    }
+    // 継承がぐるぐる回っている (A が B を、B が A を継承) とコンパイルできないので外す
+    for (const c of classes) {
+      c.bases = c.bases.filter(function (b) {
+        if (inheritsFrom(b.cls, c, {})) {
+          notices.push(c.name + " と " + b.cls.name + " がお互いを継承しているので、" + c.name + " の継承を外しました。");
+          return false;
+        }
+        return true;
+      });
+    }
+  }
+
+  function inheritsFrom(cls, target, seen) {
+    if (seen[cls.nodeId]) return false;
+    seen[cls.nodeId] = true;
+    return cls.bases.some(function (b) { return b.cls === target || inheritsFrom(b.cls, target, seen); });
+  }
+
+  // override の関数が、親クラスの virtual な関数と同じ形かを調べる (違えばお知らせ)
+  function checkOverrides(classes, notices) {
+    function findVirtual(cls, signature, seen) {
+      for (const b of cls.bases) {
+        if (seen[b.cls.nodeId]) continue;
+        seen[b.cls.nodeId] = true;
+        const hit = b.cls.members.some(function (m) {
+          return m.kind === "function" && (m.isVirtual || m.isOverride) && signatureOf(m) === signature;
+        });
+        if (hit || findVirtual(b.cls, signature, seen)) return true;
+      }
+      return false;
+    }
+    for (const c of classes) {
+      for (const m of c.members) {
+        if (m.kind !== "function" || !m.isOverride) continue;
+        if (c.bases.length === 0) {
+          notices.push(c.name + "::" + signatureOf(m) + " は override ですが、" + c.name + " は何も継承していません。");
+        } else if (!findVirtual(c, signatureOf(m), {})) {
+          notices.push(c.name + "::" + signatureOf(m) + " は override ですが、親クラスに同じ形の virtual 関数がありません。親クラスの関数を Virtual にしてください。");
+        }
+      }
+    }
+  }
+
+  function paramList(f) {
+    return f.params.map(function (p) { return p.type + " " + p.name; }).join(", ");
+  }
+
+  // 必要な #include を集めて並べる (標準ライブラリ → このプロジェクトのクラス)
+  const STD_INCLUDES = [
+    [/std::string\b/, "<string>"], [/std::vector\b/, "<vector>"], [/std::array\b/, "<array>"],
+    [/std::(unique_ptr|shared_ptr|weak_ptr)\b/, "<memory>"], [/std::map\b/, "<map>"],
+    [/std::unordered_map\b/, "<unordered_map>"], [/std::list\b/, "<list>"],
+    [/\bu?int(8|16|32|64)_t\b/, "<cstdint>"], [/\bsize_t\b/, "<cstddef>"]
+  ];
+  function includesFor(cls, allClasses) {
+    const types = cls.members.map(function (m) {
+      return [m.type || m.returnType].concat((m.params || []).map(function (p) { return p.type; })).join(" ");
+    }).join(" ");
+    const std = [];
+    for (const pair of STD_INCLUDES) {
+      if (pair[0].test(types) && std.indexOf(pair[1]) < 0) std.push(pair[1]);
+    }
+    const local = [];
+    // 継承元のヘッダーは必ず読み込む
+    for (const b of cls.bases) {
+      if (local.indexOf(b.cls.fileName) < 0) local.push(b.cls.fileName);
+    }
+    for (const other of allClasses) {
+      if (other === cls) continue;
+      if (new RegExp("\\b" + other.name + "\\b").test(types) && local.indexOf(other.fileName) < 0) local.push(other.fileName);
+    }
+    return {
+      std: std.sort().map(function (h) { return "#include " + h; }),
+      local: local.sort().map(function (f) { return "#include \"" + f + ".h\""; })
+    };
+  }
+
+  function noteComment(item) {
+    return item.note ? " // " + item.label + (item.converted ? "" : " (英語に変換できなかったので仮の名前です)") : "";
+  }
+
+  // namespace のかっこで包む (入れ子の順に)
+  function wrapNamespaces(lines, namespaces, naming) {
+    if (namespaces.length === 0) return lines;
+    let inner = lines;
+    for (let i = namespaces.length - 1; i >= 0; i--) {
+      inner = ["namespace " + namespaces[i], "{"]
+        .concat(inner.map(function (line) { return line === "" ? "" : naming.namespaceIndent + line; }))
+        .concat(["}"]);
+    }
+    return inner;
+  }
+
+  function memberDeclaration(m) {
+    if (m.kind === "variable") {
+      const init = m.init === null ? ";" + " // 参照はコンストラクタで初期化してください" : " = " + m.init + ";";
+      return INDENT + m.type + " " + m.name + init + noteComment(m);
+    }
+    if (m.isConstructor) return INDENT + m.name + "(" + paramList(m) + ");";
+    return INDENT + (m.isVirtual ? "virtual " : "") + m.returnType + " " + m.name + "(" + paramList(m) + ")" +
+      (m.isOverride ? " override" : "") + ";" + noteComment(m);
+  }
+
+  function classHeaderText(cls, allClasses, naming) {
+    let lines = ["#pragma once", ""];
+    const inc = includesFor(cls, allClasses);
+    if (inc.std.length) lines = lines.concat(inc.std, [""]);
+    if (inc.local.length) lines = lines.concat(inc.local, [""]);
+
+    let block = [];
+    if (cls.note) block.push("//" + noteComment(cls).slice(3));
+    const bases = cls.bases.map(function (b) { return b.access + " " + b.qualifiedName; });
+    block.push("class " + cls.name + (bases.length ? " : " + bases.join(", ") : ""));
+    block.push("{");
+    // アクセスごとにまとめる (設計で最初に出てきた順)。各まとまりの中ではコンストラクタを先に書く
+    const order = [];
+    for (const m of cls.members) if (order.indexOf(m.access) < 0) order.push(m.access);
+    order.forEach(function (access, i) {
+      if (i > 0) block.push("");
+      block.push(access + ":");
+      const inSection = cls.members.filter(function (m) { return m.access === access; });
+      const ctors = inSection.filter(function (m) { return m.isConstructor; });
+      const others = inSection.filter(function (m) { return !m.isConstructor; });
+      for (const m of ctors) block.push(memberDeclaration(m));
+      if (ctors.length && others.length) block.push("");
+      for (const m of others) block.push(memberDeclaration(m));
+    });
+    block.push("};");
+    return lines.concat(wrapNamespaces(block, cls.namespaces, naming)).join("\n") + "\n";
+  }
+
+  function classSourceText(cls, naming) {
+    const lines = ["#include \"" + cls.fileName + ".h\""];
+    let block = [];
+    // .cpp には virtual / override は書かない (C++ の決まり)。コンストラクタを先に書く
+    const functions = cls.members.filter(function (m) { return m.kind === "function"; });
+    const ordered = functions.filter(function (m) { return m.isConstructor; })
+      .concat(functions.filter(function (m) { return !m.isConstructor; }));
+    for (const m of ordered) {
+      if (block.length) block.push("");
+      if (m.note) block.push("//" + noteComment(m).slice(3));
+      block.push((m.isConstructor ? "" : m.returnType + " ") + cls.name + "::" + m.name + "(" + paramList(m) + ")");
+      block.push("{");
+      for (const v of m.locals) {
+        block.push(INDENT + v.type + " " + v.name + (v.init === null ? ";" : " = " + v.init + ";") + noteComment(v));
+      }
+      for (const s of m.body) {
+        if (s.type === "call") block.push(INDENT + s.name + "();");
+      }
+      if (!m.isConstructor && m.returnType !== "void" && m.body.length === 0 && m.locals.length === 0) {
+        block.push(INDENT + "// TODO: " + m.returnType + " の値を返す");
+      }
+      block.push("}");
+    }
+    if (block.length === 0) return lines.join("\n") + "\n";
+    return lines.concat([""], wrapNamespaces(block, cls.namespaces, naming)).join("\n") + "\n";
+  }
+
+  // 外から使う: ツリー → { classes, notices, files: [{ fileName, className, kind: "h"|"cpp", text }] }
+  function generateCppClasses(tree, naming) {
+    naming = naming || CppNaming;
+    const model = buildClassModel(tree, naming);
+    const files = [];
+    for (const cls of model.classes) {
+      // className はタブの区別用 (同じクラス名が別の namespace にあっても区別できるようファイル名を使う)
+      files.push({ fileName: cls.fileName + ".h", className: cls.fileName, kind: "h", text: classHeaderText(cls, model.classes, naming) });
+      files.push({ fileName: cls.fileName + ".cpp", className: cls.fileName, kind: "cpp", text: classSourceText(cls, naming) });
+    }
+    return { classes: model.classes, notices: model.notices, files: files };
+  }
+
+  return {
+    languages: LANGUAGES,
+    styles: STYLES,
+    generate: generate,
+    generateCppClasses: generateCppClasses,
+    cppNaming: CppNaming,
+    nameInfo: nameInfo,
+    previewName: previewName,
+    codeNameOf: codeNameOf,
+    nameToWords: nameToWords
+  };
+})();
+</script>
+
+<script>
+// =============================================
+// データ
+// 1つのノード = { id, name, children: [ノード...], expanded }
+// children の中にまたノードが入るので「再帰的な」木構造になります。
+// =============================================
+let nextId = 1;
+
+function createNode(name) {
+  return {
+    id: nextId++,
+    name: name,
+    children: [],
+    expanded: true,
+    kind: "group"  // 種類: "group" | "class" | "function" | "variable" (無いノードもグループ扱い)
+  };
+}
+
+// ノードの種類と、その表示名
+const NODE_KINDS = {
+  group: { label: "グループ", chip: "GROUP", hint: "コードにはなりません。設計を整理するためだけに使います。" },
+  namespace: { label: "namespace", chip: "NAMESPACE", hint: "C++ の namespace になります。中にクラスや namespace を入れてください (入れ子にできます)。" },
+  class: { label: "クラス", chip: "CLASS", hint: "C++ の class になります。中に「関数」や「変数」のノードを入れてください。" },
+  function: { label: "関数", chip: "FUNCTION", hint: "クラスのメンバ関数になります。中に関数を入れるとその関数の呼び出しに、変数を入れるとローカル変数になります。" },
+  variable: { label: "変数", chip: "VARIABLE", hint: "クラスの直下ならメンバ変数 (m_ 付き)、関数の中ならローカル変数になります。" }
+};
+const ACCESS_LEVELS = ["public", "private", "protected"];
+
+function getKind(node) {
+  return NODE_KINDS[node.kind] ? node.kind : "group";
+}
+
+let root = createNode("新しいプログラム"); // 読み込みで入れ替えるので let
+
+let editingId = null;      // いま名前を編集中のノードのid (なければ null)
+
+// =============================================
+// ツリーを探すための関数 (どれも再帰)
+// =============================================
+
+// id からノードを探す
+function findNode(node, id) {
+  if (node.id === id) return node;
+  for (const child of node.children) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+// id のノードの「親」を探す
+function findParent(node, id) {
+  for (const child of node.children) {
+    if (child.id === id) return node;
+    const found = findParent(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+// 子孫(子・孫・ひ孫…)の数を数える
+function countDescendants(node) {
+  let count = 0;
+  for (const child of node.children) {
+    count += 1 + countDescendants(child);
+  }
+  return count;
+}
+
+// 一番深い階層を調べる (ルートだけなら 1)
+function getDepth(node) {
+  let deepest = 0;
+  for (const child of node.children) {
+    deepest = Math.max(deepest, getDepth(child));
+  }
+  return deepest + 1;
+}
+
+// =============================================
+// 操作
+// =============================================
+
+function addChild(parent) {
+  const child = createNode("新しい処理");
+  // クラスの中に追加したときは、最初から public な関数にしておく
+  if (getKind(parent) === "class") {
+    child.name = "新しい関数";
+    child.kind = "function";
+    child.access = "public";
+    child.type = "void";
+    child.params = [];
+  }
+  // namespace の中に追加したときは、最初からクラスにしておく
+  if (getKind(parent) === "namespace") {
+    child.name = "NewClass";
+    child.kind = "class";
+  }
+  parent.children.push(child);
+  parent.expanded = true;   // 追加したら親を開いて見えるようにする
+  editingId = child.id;     // 追加した直後に名前を入力できるようにする
+  render();
+}
+
+function toggle(node) {
+  node.expanded = !node.expanded;
+  render();
+}
+
+function removeNode(node) {
+  const parent = findParent(root, node.id);
+  if (!parent) return; // ルートは削除しない
+  parent.children = parent.children.filter(function (c) { return c.id !== node.id; });
+  render();
+}
+
+// 削除ボタンが押されたとき
+function requestDelete(node) {
+  if (node.children.length === 0) {
+    removeNode(node); // 子がなければすぐ削除
+    return;
+  }
+  // 子があるときは確認を出す
+  showConfirm(
+    "処理を削除しますか？",
+    "「" + node.name + "」と、その下にある " + countDescendants(node) + " 個の処理がすべて削除されます。",
+    "削除する",
+    function () { removeNode(node); }
+  );
+}
+
+// =============================================
+// 確認画面 (いろいろな場面で使い回す)
+// onOk = 「OK側のボタン」を押したときに実行する関数
+// =============================================
+let confirmAction = null;
+
+function showConfirm(title, text, okLabel, onOk) {
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-text").textContent = text;
+  document.getElementById("confirm-ok").textContent = okLabel;
+  confirmAction = onOk;
+  document.getElementById("confirm").hidden = false;
+}
+
+document.getElementById("confirm-ok").addEventListener("click", function () {
+  document.getElementById("confirm").hidden = true;
+  if (confirmAction) confirmAction();
+  confirmAction = null;
+});
+document.getElementById("confirm-cancel").addEventListener("click", function () {
+  document.getElementById("confirm").hidden = true;
+  confirmAction = null;
+});
+
+// 画面下に短いメッセージを出す
+let toastTimer = null;
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { toast.hidden = true; }, 2200);
+}
+
+// =============================================
+// プロジェクト管理 (localStorage に保存)
+//
+// localStorage には文字列しか入らないので、JSON に変換して保存します。
+// 保存の形:
+// {
+//   "projects": {
+//     "p17...": { "id": "p17...", "name": "RPGゲーム", "updatedAt": "2026-10-05T13:10:00.000Z", "tree": ルートノード },
+//     "p18...": { ... }
+//   }
+// }
+// =============================================
+const STORAGE_KEY = "designTree.data";
+const OLD_STORAGE_KEY = "designTree.projects"; // 前のバージョンの保存場所 (配列)
+
+let data = { projects: {} }; // 保存データ (メモリ上のコピー)
+let currentId = null;        // いま開いているプロジェクトのid
+let lastSavedJson = "";      // 最後に保存したツリー (変化があったか比べるため)
+
+// 起動時に一度だけ読み込む
+function loadData() {
+  try {
+    const text = localStorage.getItem(STORAGE_KEY);
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.projects && typeof parsed.projects === "object") data = parsed;
+      return;
+    }
+    // 前のバージョンのデータがあれば、新しい形に移しかえる
+    const oldText = localStorage.getItem(OLD_STORAGE_KEY);
+    if (oldText) {
+      const oldList = JSON.parse(oldText);
+      if (Array.isArray(oldList)) {
+        for (const p of oldList) {
+          if (p && p.id && p.tree) data.projects[p.id] = p;
+        }
+        writeData();
+      }
+    }
+  } catch (e) {
+    data = { projects: {} }; // 読めないときは空として扱う
+  }
+}
+
+// この端末のブラウザ (localStorage) に書き込む。成功したら true
+function writeLocal() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    showToast("保存できませんでした。ブラウザの保存領域が使えない状態です。");
+    return false;
+  }
+}
+
+// データを保存する。changedId = 変わったプロジェクトのid (クラウドにも送る)
+// ブラウザには必ず保存し、claude.ai で開いているときはクラウドにも送る (下の「クラウド同期」)
+function writeData(changedId) {
+  const ok = writeLocal();
+  if (changedId) queueCloudWrite(changedId);
+  return ok;
+}
+
+// プロジェクトを配列にして、最終更新が新しい順に並べる
+function getProjectList() {
+  return Object.values(data.projects).sort(function (a, b) {
+    return (b.updatedAt || "").localeCompare(a.updatedAt || "");
+  });
+}
+
+// 同じ名前のプロジェクトがあるか (exceptId のプロジェクトは除く)
+function nameExists(name, exceptId) {
+  return Object.values(data.projects).some(function (p) {
+    return p.name === name && p.id !== exceptId;
+  });
+}
+
+// 重ならない名前を作る (「RPGゲーム コピー」がすでにあれば「RPGゲーム コピー 2」)
+function makeUniqueName(base) {
+  if (!nameExists(base)) return base;
+  let n = 2;
+  while (nameExists(base + " " + n)) n++;
+  return base + " " + n;
+}
+
+function newProjectId() {
+  return "p" + Date.now() + Math.floor(Math.random() * 1000);
+}
+
+// ツリーの中で一番大きい id を探す (ノードを足すとき id が重ならないようにするため)
+function getMaxId(node) {
+  let max = node.id;
+  for (const child of node.children) {
+    max = Math.max(max, getMaxId(child));
+  }
+  return max;
+}
+
+// 日付を「10/05 22:10」の形にする (去年以前なら年も付ける)
+function formatDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "-";
+  const pad = function (n) { return String(n).padStart(2, "0"); };
+  let text = pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  if (d.getFullYear() !== new Date().getFullYear()) text = d.getFullYear() + "/" + text;
+  return text;
+}
+
+// --- プロジェクトの操作 ---
+
+function createProject(name) {
+  const id = newProjectId();
+  data.projects[id] = {
+    id: id,
+    name: name,
+    updatedAt: new Date().toISOString(),
+    tree: { id: 1, name: name, children: [], expanded: true } // 最初はルートノードだけ
+  };
+  writeData(id);
+  openProject(id);
+  showToast("「" + name + "」を作成しました");
+}
+
+function openProject(id) {
+  const project = data.projects[id];
+  if (!project) return;
+  currentId = id;
+  root = project.tree;              // このプロジェクトのツリーを画面に出す
+  nextId = getMaxId(root) + 1;
+  editingId = null;
+  lastSavedJson = JSON.stringify(root);
+  showScreen("editor");
+  render();
+  window.scrollTo(0, 0);
+}
+
+function renameProject(id, name) {
+  data.projects[id].name = name;
+  data.projects[id].updatedAt = new Date().toISOString();
+  writeData(id);
+  renderProjectList();
+  showToast("名前を「" + name + "」に変更しました");
+}
+
+function duplicateProject(id) {
+  const source = data.projects[id];
+  const copyId = newProjectId();
+  data.projects[copyId] = {
+    id: copyId,
+    name: makeUniqueName(source.name + " コピー"),
+    updatedAt: new Date().toISOString(),
+    // JSON に変換して戻すと、子孫まで全部まるごと別物としてコピーされる
+    tree: JSON.parse(JSON.stringify(source.tree))
+  };
+  writeData(copyId);
+  renderProjectList();
+  showToast("「" + data.projects[copyId].name + "」を作成しました");
+}
+
+function deleteProject(id) {
+  const name = data.projects[id].name;
+  showConfirm(
+    "このプロジェクトを削除しますか？",
+    "「" + name + "」と、その中のツリーがすべて削除されます。元に戻すことはできません。",
+    "削除する",
+    function () {
+      delete data.projects[id];
+      writeData(id); // クラウドからも消える
+      renderProjectList();
+      showToast("「" + name + "」を削除しました");
+    }
+  );
+}
+
+// --- 保存 ---
+
+// 自動保存: ツリーが前回の保存から変わっていたら保存する
+function autoSave() {
+  if (!currentId || !data.projects[currentId]) return;
+  const json = JSON.stringify(root);
+  if (json === lastSavedJson) return; // 変化なし
+  data.projects[currentId].updatedAt = new Date().toISOString();
+  if (writeData(currentId)) {
+    lastSavedJson = json;
+    updateSaveState();
+  }
+}
+
+// 手動保存 (「保存」ボタン)
+function saveNow() {
+  if (!currentId) return;
+  data.projects[currentId].updatedAt = new Date().toISOString();
+  if (writeData(currentId)) {
+    flushCloud(); // 手動保存はすぐにクラウドへ送る
+    lastSavedJson = JSON.stringify(root);
+    updateSaveState();
+    showToast("「" + data.projects[currentId].name + "」を保存しました");
+  }
+}
+
+function updateSaveState() {
+  const el = document.getElementById("save-state");
+  if (el && currentId && data.projects[currentId]) {
+    el.textContent = "保存済み " + formatDate(data.projects[currentId].updatedAt) + " · " + syncLabel();
+  }
+  const sync = document.getElementById("sync-state");
+  if (sync) {
+    sync.textContent = syncLabel();
+    sync.dataset.state = cloud.status;
+  }
+}
+
+document.getElementById("save-btn").addEventListener("click", saveNow);
+
+// --- 画面の切り替え ---
+
+function showScreen(name) {
+  document.getElementById("projects-screen").hidden = name !== "projects";
+  document.getElementById("editor-screen").hidden = name !== "editor";
+  document.getElementById("code-screen").hidden = name !== "code";
+}
+
+function backToProjects() {
+  autoSave();
+  currentId = null;
+  showScreen("projects");
+  renderProjectList();
+  window.scrollTo(0, 0);
+}
+
+document.getElementById("back-btn").addEventListener("click", backToProjects);
+
+// --- プロジェクト一覧を作る ---
+
+function renderProjectList() {
+  const list = document.getElementById("project-list");
+  list.innerHTML = "";
+  const projects = getProjectList();
+
+  if (projects.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    const text = document.createElement("p");
+    text.textContent = "まだプロジェクトがありません。作りたいプログラムごとにプロジェクトを作りましょう。";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tool-btn primary";
+    btn.textContent = "＋ 新規作成";
+    btn.addEventListener("click", openCreateDialog);
+    empty.appendChild(text);
+    empty.appendChild(btn);
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const project of projects) {
+    const item = document.createElement("li");
+    item.className = "project-item";
+
+    // カードをタップすると開く
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "project-open";
+    const nameEl = document.createElement("span");
+    nameEl.className = "p-name";
+    nameEl.textContent = project.name;
+    const meta = document.createElement("span");
+    meta.className = "p-meta";
+    const date = document.createElement("span");
+    date.textContent = "最終更新：" + formatDate(project.updatedAt);
+    const count = document.createElement("span");
+    count.textContent = "処理 " + (1 + countDescendants(project.tree));
+    meta.appendChild(date);
+    meta.appendChild(count);
+    openBtn.appendChild(nameEl);
+    openBtn.appendChild(meta);
+    openBtn.addEventListener("click", function () { openProject(project.id); });
+    item.appendChild(openBtn);
+
+    // ⋯ で操作メニュー
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "btn-more";
+    moreBtn.textContent = "⋯";
+    moreBtn.setAttribute("aria-label", "「" + project.name + "」の操作");
+    moreBtn.addEventListener("click", function () { openMenu(project.id); });
+    item.appendChild(moreBtn);
+
+    list.appendChild(item);
+  }
+}
+
+// --- 操作メニュー ---
+let menuProjectId = null;
+
+function openMenu(id) {
+  menuProjectId = id;
+  document.getElementById("menu-title").textContent = data.projects[id].name;
+  document.getElementById("menu-dialog").hidden = false;
+}
+
+function closeMenu() {
+  document.getElementById("menu-dialog").hidden = true;
+}
+
+document.getElementById("menu-cancel").addEventListener("click", closeMenu);
+document.getElementById("menu-open").addEventListener("click", function () {
+  closeMenu();
+  openProject(menuProjectId);
+});
+document.getElementById("menu-rename").addEventListener("click", function () {
+  closeMenu();
+  openRenameDialog(menuProjectId);
+});
+document.getElementById("menu-duplicate").addEventListener("click", function () {
+  closeMenu();
+  duplicateProject(menuProjectId);
+});
+document.getElementById("menu-delete").addEventListener("click", function () {
+  closeMenu();
+  deleteProject(menuProjectId);
+});
+
+// --- プロジェクト名の入力画面 (新規作成・名前変更) ---
+let nameDialogAction = null; // 「OK」を押したときに実行する関数
+
+function openNameDialog(title, okLabel, initialName, onOk) {
+  document.getElementById("name-title").textContent = title;
+  document.getElementById("name-ok").textContent = okLabel;
+  document.getElementById("name-error").hidden = true;
+  const input = document.getElementById("project-input");
+  input.value = initialName;
+  nameDialogAction = onOk;
+  document.getElementById("name-dialog").hidden = false;
+  input.focus();
+  input.select();
+}
+
+function closeNameDialog() {
+  document.getElementById("name-dialog").hidden = true;
+}
+
+function showNameError(message) {
+  const error = document.getElementById("name-error");
+  error.textContent = message;
+  error.hidden = false;
+}
+
+function openCreateDialog() {
+  openNameDialog("新しいプロジェクト", "作成する", "", function (name) {
+    if (nameExists(name)) return showNameError("同じ名前のプロジェクトがすでにあります。");
+    closeNameDialog();
+    createProject(name);
+  });
+}
+
+function openRenameDialog(id) {
+  openNameDialog("名前を変更", "変更する", data.projects[id].name, function (name) {
+    if (nameExists(name, id)) return showNameError("同じ名前のプロジェクトがすでにあります。");
+    closeNameDialog();
+    renameProject(id, name);
+  });
+}
+
+document.getElementById("new-btn").addEventListener("click", openCreateDialog);
+document.getElementById("name-cancel").addEventListener("click", closeNameDialog);
+document.getElementById("name-form").addEventListener("submit", function (e) {
+  e.preventDefault(); // フォーム送信でページが再読み込みされないようにする
+  const name = document.getElementById("project-input").value.trim();
+  if (name === "") return showNameError("プロジェクト名を入力してください。");
+  if (nameDialogAction) nameDialogAction(name);
+});
+
+// =============================================
+// 画面を作る
+// =============================================
+
+function render() {
+  const tree = document.getElementById("tree");
+  tree.innerHTML = "";
+  tree.appendChild(renderNode(root, true));
+
+  // ツリーが変わっていたら自動保存 (render はツリーを変えるたびに呼ばれる)
+  autoSave();
+
+  const total = 1 + countDescendants(root);
+  document.getElementById("status").innerHTML =
+    "<span>処理 <b>" + total + "</b></span>" +
+    "<span>階層 <b>" + getDepth(root) + "</b></span>" +
+    "<span class=\"save-state\" id=\"save-state\"></span>";
+  updateSaveState();
+
+  // いま開いているプロジェクト名
+  if (currentId) {
+    document.getElementById("project-title").textContent = data.projects[currentId].name;
+  }
+
+  // コピーした直後のノードを目立たせて、見える位置までスクロール
+  if (copiedId !== null) {
+    const copiedRow = tree.querySelector('.row[data-id="' + copiedId + '"]');
+    copiedId = null;
+    if (copiedRow) {
+      copiedRow.classList.add("just-copied");
+      copiedRow.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  // 編集中の入力欄があればフォーカスして全選択
+  const input = tree.querySelector(".name-input");
+  if (input) {
+    input.focus();
+    input.select();
+    input.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+// 1つのノード(とその子孫)を <li> として作る。子に対して自分自身を呼ぶ = 再帰
+function renderNode(node, isRoot) {
+  const li = document.createElement("li");
+  li.className = "node";
+
+  const row = document.createElement("div");
+  row.className = isRoot ? "row is-root" : "row";
+  row.dataset.id = node.id; // ドラッグ&ドロップで「どのノードか」を調べるために使う
+  row.dataset.kind = getKind(node); // 種類ごとに左端の色を変える
+  li.appendChild(row);
+
+  // --- 開閉ボタン ---
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  if (node.children.length > 0) {
+    toggleBtn.className = "toggle";
+    toggleBtn.textContent = node.expanded ? "▼" : "▶";
+    toggleBtn.setAttribute("aria-label", node.expanded ? "折りたたむ" : "展開する");
+    toggleBtn.addEventListener("click", function () { toggle(node); });
+  } else {
+    toggleBtn.className = "toggle leaf";
+    toggleBtn.textContent = "●";
+    toggleBtn.tabIndex = -1;
+    toggleBtn.setAttribute("aria-hidden", "true");
+  }
+  row.appendChild(toggleBtn);
+
+  // --- 名前 (編集中なら入力欄) ---
+  if (node.id === editingId) {
+    row.appendChild(createNameInput(node));
+  } else {
+    row.appendChild(createNameButton(node, isRoot));
+  }
+
+  // --- ＋ と × ---
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "btn-icon btn-add";
+  addBtn.textContent = "＋";
+  addBtn.setAttribute("aria-label", "「" + node.name + "」に子の処理を追加");
+  addBtn.addEventListener("click", function () { addChild(node); });
+  actions.appendChild(addBtn);
+
+  // ⋯ : 編集 / コピー / 削除 のメニュー
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "btn-icon btn-node-menu";
+  menuBtn.textContent = "⋯";
+  menuBtn.setAttribute("aria-label", "「" + node.name + "」のメニュー (編集・コピー・削除)");
+  menuBtn.addEventListener("click", function () { openNodeMenu(node); });
+  actions.appendChild(menuBtn);
+  row.appendChild(actions);
+
+  // --- 子ノード (開いているときだけ表示) ---
+  if (node.children.length > 0 && node.expanded) {
+    const ul = document.createElement("ul");
+    ul.className = "children";
+    for (const child of node.children) {
+      ul.appendChild(renderNode(child, false));
+    }
+    li.appendChild(ul);
+  }
+
+  return li;
+}
+
+// タップすると編集になる名前ボタン
+function createNameButton(node, isRoot) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "name";
+
+  if (isRoot) {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = "MAIN";
+    btn.appendChild(tag);
+  }
+
+  const wrap = document.createElement("span");
+  wrap.className = "label-wrap";
+  const line = document.createElement("span");
+  line.className = "label-line";
+
+  // 種類 (GROUP / NAMESPACE / CLASS / FUNCTION / VARIABLE)
+  const kind = getKind(node);
+  const chip = document.createElement("span");
+  chip.className = "kind-chip " + kind;
+  chip.textContent = kind === "function" && node.isConstructor ? "CONSTRUCTOR" : NODE_KINDS[kind].chip;
+  line.appendChild(chip);
+
+  const text = document.createElement("span");
+  text.textContent = node.name;
+  line.appendChild(text);
+
+  // 折りたたみ中は、隠れている処理の数を表示
+  if (node.children.length > 0 && !node.expanded) {
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = "(" + countDescendants(node) + ")";
+    line.appendChild(count);
+  }
+  wrap.appendChild(line);
+
+  // 関数・変数は、アクセスと型を小さく表示 (例: public · void(float, int))。英語名があればそれも
+  let meta = describeNode(node);
+  if (node.englishName) meta = (meta ? meta + " · " : "") + "英語名: " + node.englishName;
+  if (meta) {
+    const metaEl = document.createElement("span");
+    metaEl.className = "node-meta";
+    metaEl.textContent = meta;
+    wrap.appendChild(metaEl);
+  }
+  btn.appendChild(wrap);
+
+  btn.addEventListener("click", function () { openNodeSettings(node); });
+  return btn;
+}
+
+// ツリーに出す説明文
+function describeNode(node) {
+  const kind = getKind(node);
+  if (kind === "variable") return (node.access || "public") + " · " + (node.type || "int");
+  if (kind === "function") {
+    const params = (node.params || []).map(function (p) { return p.type || "int"; }).join(", ");
+    if (node.isConstructor) return "コンストラクタ · " + (node.access || "public") + " · (" + params + ")";
+    return (node.access || "public") + (node.isVirtual ? " · virtual" : "") + " · " +
+      (node.type || "void") + "(" + params + ")" + (node.isOverride ? " · override" : "");
+  }
+  if (kind === "class" && Array.isArray(node.inheritance) && node.inheritance.length) {
+    return "継承: " + node.inheritance.map(function (b) {
+      const base = findNode(root, b.baseId);
+      return (b.access || "public") + " " + (base ? base.name : "(見つかりません)");
+    }).join(", ");
+  }
+  return "";
+}
+
+// 名前の入力欄
+function createNameInput(node) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "name-input";
+  input.id = "edit-" + node.id;
+  input.value = node.name;
+  input.enterKeyHint = "done";
+  input.setAttribute("aria-label", "処理の名前");
+
+  let cancelled = false;
+
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.isComposing) { input.blur(); }   // Enterで確定 (日本語変換中は除く)
+    if (e.key === "Escape") { cancelled = true; input.blur(); }  // Escで取り消し
+  });
+
+  // 入力欄から離れたら確定する
+  input.addEventListener("blur", function () {
+    const value = input.value.trim();
+    if (!cancelled && value !== "") {
+      node.name = value;
+    }
+    if (editingId === node.id) editingId = null;
+    autoSave(); // 名前の変更を自動保存
+    if (!input.isConnected) return; // すでに画面から消えている場合は何もしない
+    // 画面全体を作り直すと、いま押した ＋ や × のボタンが消えてしまうので
+    // 入力欄だけを名前ボタンに置き換える
+    input.replaceWith(createNameButton(node, node === root));
+  });
+
+  return input;
+}
+
+// =============================================
+// ドラッグ&ドロップ (ブラウザ標準の Pointer Events を使用)
+//
+// 流れ:
+//  1. pointerdown  … 押し始め。まだドラッグではない (press に記録)
+//  2. スマホ: 400ms 動かさずに押し続けたらドラッグ開始
+//     マウス: ボタンを押したまま少し動かしたらドラッグ開始
+//  3. pointermove  … 指の位置を記録。毎フレーム、落とす場所を計算して表示
+//  4. pointerup    … 落とす場所が正しければノードを移動
+// =============================================
+const LONG_PRESS_MS = 400;  // 長押しと判定するまでの時間
+const TOUCH_SLOP = 8;       // 長押し前にこれ以上動いたら「スクロール」とみなす(px)
+const MOUSE_SLOP = 6;       // マウスでこれ以上動いたらドラッグ開始(px)
+
+let press = null;          // 押し始めの情報
+let drag = null;           // ドラッグ中の情報
+let suppressClick = false; // ドラッグ直後のクリック(=編集開始など)を無効にする
+
+const treeEl = document.getElementById("tree");
+const dropLine = document.createElement("div");
+dropLine.className = "drop-line";
+dropLine.hidden = true;
+document.body.appendChild(dropLine);
+
+// ancestor の子孫に node が含まれるか (自分自身も含む)
+function isInside(ancestor, node) {
+  return findNode(ancestor, node.id) !== null;
+}
+
+// --- 1. 押し始め ---
+treeEl.addEventListener("pointerdown", function (e) {
+  if (!e.isPrimary || e.button !== 0) return;  // 左ボタン(または指1本)だけ
+  if (press || drag) return;
+  if (e.target.closest("input")) return;      // 名前の入力中は文字の選択を優先
+  const row = e.target.closest(".row");
+  if (!row) return;
+  const node = findNode(root, Number(row.dataset.id));
+  if (!node || node === root) return;         // ルートは動かせない
+
+  press = {
+    pointerId: e.pointerId,
+    pointerType: e.pointerType,
+    startX: e.clientX, startY: e.clientY,
+    x: e.clientX, y: e.clientY,
+    node: node,
+    row: row,
+    timer: null
+  };
+  if (e.pointerType !== "mouse") {
+    press.timer = setTimeout(startDrag, LONG_PRESS_MS);
+  }
+});
+
+function cancelPress() {
+  if (press) clearTimeout(press.timer);
+  press = null;
+}
+
+// --- 2. ドラッグ開始 ---
+function startDrag() {
+  if (!press) return;
+  clearTimeout(press.timer);
+
+  // 名前を編集中なら確定させる
+  if (document.activeElement && document.activeElement.classList.contains("name-input")) {
+    document.activeElement.blur();
+  }
+
+  const ghost = document.createElement("div");
+  ghost.className = "ghost";
+  ghost.textContent = press.node.name;
+  const sub = document.createElement("span");
+  sub.className = "ghost-sub";
+  ghost.appendChild(sub);
+  document.body.appendChild(ghost);
+
+  drag = {
+    node: press.node,
+    li: press.row.closest("li"),
+    pointerId: press.pointerId,
+    pointerType: press.pointerType,
+    x: press.x, y: press.y,
+    ghost: ghost,
+    ghostSub: sub,
+    drop: null,
+    frame: 0
+  };
+  press = null;
+
+  drag.li.classList.add("dragging");
+  document.body.classList.add("is-dragging");
+  try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) { /* 振動できない端末は無視 */ }
+
+  dragLoop();
+}
+
+// --- 3. 指(マウス)の動き ---
+window.addEventListener("pointermove", function (e) {
+  if (press && e.pointerId === press.pointerId) {
+    press.x = e.clientX;
+    press.y = e.clientY;
+    const dist = Math.hypot(e.clientX - press.startX, e.clientY - press.startY);
+    if (press.pointerType === "mouse") {
+      if (dist > MOUSE_SLOP) startDrag();
+    } else if (dist > TOUCH_SLOP) {
+      cancelPress(); // 長押しの前に動いた = スクロールしたい
+    }
+    return;
+  }
+  if (drag && e.pointerId === drag.pointerId) {
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+  }
+});
+
+// ドラッグ中は画面がスクロールしないようにする (スマホ)
+document.addEventListener("touchmove", function (e) {
+  if (drag) e.preventDefault();
+}, { passive: false });
+
+// 長押しで出るメニュー(Androidなど)を出さない
+document.addEventListener("contextmenu", function (e) {
+  if (press || drag) e.preventDefault();
+});
+
+// 新しく押し始めたら、前のドラッグのクリック無効化は解除する
+document.addEventListener("pointerdown", function () {
+  if (!drag) suppressClick = false;
+}, true);
+
+// ドラッグを終えた直後のクリックは無視する (編集が始まらないように)
+document.addEventListener("click", function (e) {
+  if (suppressClick) {
+    e.stopPropagation();
+    e.preventDefault();
+    suppressClick = false;
+  }
+}, true);
+
+// 毎フレーム: 端に近ければ自動スクロールし、落とす場所を更新する
+function dragLoop() {
+  if (!drag) return;
+  const edge = 70;
+  if (drag.y < edge) {
+    window.scrollBy(0, -Math.ceil((edge - drag.y) / 5));
+  } else if (drag.y > window.innerHeight - edge) {
+    window.scrollBy(0, Math.ceil((drag.y - (window.innerHeight - edge)) / 5));
+  }
+  updateDrop();
+  drag.frame = requestAnimationFrame(dragLoop);
+}
+
+// 指の下にあるノードと、その中のどの位置か(上側・中央・下側)を調べる
+function findDrop(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const row = el ? el.closest("#tree .row") : null;
+  if (!row) return null;
+  const target = findNode(root, Number(row.dataset.id));
+  if (!target) return null;
+
+  const rect = row.getBoundingClientRect();
+  const ratio = (y - rect.top) / rect.height;
+  let position;
+  if (target === root) position = "inside";   // ルートの前後には置けないので「中」
+  else if (ratio < 0.3) position = "before";
+  else if (ratio > 0.7) position = "after";
+  else position = "inside";
+
+  // 子が見えているノードの「下側」は、すぐ下に見えている「最初の子の前」に入れる
+  if (position === "after" && target.expanded && target.children.length > 0) {
+    position = "first";
+  }
+
+  // 不正な移動: 自分自身の上 / 自分の子孫の上 (= 自分の中に自分を入れることになる)
+  const valid = !isInside(drag.node, target);
+
+  return { target: target, row: row, position: position, valid: valid };
+}
+
+function clearDropMarks() {
+  dropLine.hidden = true;
+  const marked = treeEl.querySelectorAll(".drop-inside, .drop-invalid");
+  for (const el of marked) el.classList.remove("drop-inside", "drop-invalid");
+}
+
+// 落とす場所の表示を更新する
+function updateDrop() {
+  // 影の位置: 指の場合は指で隠れないように少し上に出す
+  const ghost = drag.ghost;
+  const gx = drag.pointerType === "mouse" ? drag.x + 14 : drag.x - 30;
+  const gy = drag.pointerType === "mouse" ? drag.y + 10 : drag.y - ghost.offsetHeight - 28;
+  ghost.style.left = Math.max(8, Math.min(gx, window.innerWidth - ghost.offsetWidth - 8)) + "px";
+  ghost.style.top = Math.max(8, gy) + "px";
+
+  clearDropMarks();
+  const drop = findDrop(drag.x, drag.y);
+  drag.drop = drop;
+
+  ghost.classList.toggle("invalid", !!drop && !drop.valid);
+  if (!drop) {
+    drag.ghostSub.textContent = "ノードの上で指を離してください";
+    return;
+  }
+  if (!drop.valid) {
+    drag.ghostSub.textContent = drop.target === drag.node ? "元の位置" : "自分の中には移動できません";
+    if (drop.target !== drag.node) drop.row.classList.add("drop-invalid");
+    return;
+  }
+
+  const name = "「" + drop.target.name + "」";
+  if (drop.position === "inside") {
+    drop.row.classList.add("drop-inside");
+    drag.ghostSub.textContent = name + "の中へ";
+    return;
+  }
+
+  // 前・後ろ・最初の子 → 挿入線を表示
+  let lineRow = drop.row;
+  let lineY;
+  if (drop.position === "before") {
+    lineY = drop.row.getBoundingClientRect().top - 5;
+    drag.ghostSub.textContent = name + "の前へ";
+  } else if (drop.position === "after") {
+    lineY = drop.row.getBoundingClientRect().bottom + 1;
+    drag.ghostSub.textContent = name + "の後ろへ";
+  } else {
+    // first: 最初の子の行の上に線を出す
+    lineRow = drop.row.parentElement.querySelector(":scope > ul.children > li > .row");
+    lineY = lineRow.getBoundingClientRect().top - 5;
+    drag.ghostSub.textContent = name + "の中の先頭へ";
+  }
+  const rect = lineRow.getBoundingClientRect();
+  dropLine.style.left = rect.left + "px";
+  dropLine.style.width = rect.width + "px";
+  dropLine.style.top = lineY + "px";
+  dropLine.hidden = false;
+}
+
+// --- 4. 指を離した / 中断された ---
+window.addEventListener("pointerup", function (e) {
+  if (drag && e.pointerId === drag.pointerId) {
+    finishDrag();
+  } else {
+    cancelPress(); // 短いタップ → 普通のクリックとして扱われる
+  }
+});
+
+window.addEventListener("pointercancel", function (e) {
+  cancelPress();
+  if (drag && e.pointerId === drag.pointerId) {
+    endDrag();
+    render(); // 元の位置に戻す
+  }
+});
+
+// ドラッグの見た目を片付ける
+function endDrag() {
+  cancelAnimationFrame(drag.frame);
+  drag.ghost.remove();
+  drag.li.classList.remove("dragging");
+  document.body.classList.remove("is-dragging");
+  clearDropMarks();
+  drag = null;
+  suppressClick = true;
+  setTimeout(function () { suppressClick = false; }, 300);
+}
+
+function finishDrag() {
+  const node = drag.node;
+  const drop = drag.drop;
+  endDrag();
+
+  if (!drop || drop.target === node) {
+    render(); // 何も変えずに元の位置に戻す
+    return;
+  }
+  if (!drop.valid) {
+    render();
+    showToast("自分の中には移動できません");
+    return;
+  }
+  moveNode(node, drop.target, drop.position);
+}
+
+// ノードを移動する (ツリーのデータを書き換えて、画面を作り直す)
+function moveNode(node, target, position) {
+  // 念のためもう一度チェック: ルートは動かさない / 自分の中には入れない
+  if (node === root || isInside(node, target)) { render(); return; }
+  if (target === root && position !== "inside" && position !== "first") { render(); return; }
+
+  // 元の場所から取り外す
+  const oldParent = findParent(root, node.id);
+  oldParent.children.splice(oldParent.children.indexOf(node), 1);
+
+  // 新しい場所に入れる
+  if (position === "inside") {
+    target.children.push(node);   // 最後の子として追加
+    target.expanded = true;       // 移動先が見えるように開く
+  } else if (position === "first") {
+    target.children.unshift(node); // 最初の子として追加
+  } else {
+    const parent = findParent(root, target.id);
+    let index = parent.children.indexOf(target);
+    if (position === "after") index += 1;
+    parent.children.splice(index, 0, node);
+  }
+
+  render();
+  showToast("「" + node.name + "」を移動しました");
+}
+
+// =============================================
+// ノードのメニュー (⋯): 編集 / コピー / 削除
+// =============================================
+let menuNode = null;
+let copiedId = null; // コピーした直後のノード (画面で目立たせる)
+
+function openNodeMenu(node) {
+  menuNode = node;
+  const kind = getKind(node);
+  document.getElementById("node-menu-title").textContent = node.name;
+  // コピーできるのはクラス・関数・変数
+  document.getElementById("nm-copy").hidden = !(kind === "class" || kind === "function" || kind === "variable");
+  document.getElementById("nm-delete").hidden = node === root;
+  document.getElementById("node-menu").hidden = false;
+}
+
+function closeNodeMenu() {
+  document.getElementById("node-menu").hidden = true;
+}
+
+document.getElementById("nm-cancel").addEventListener("click", closeNodeMenu);
+document.getElementById("nm-edit").addEventListener("click", function () {
+  closeNodeMenu();
+  openNodeSettings(menuNode);
+});
+document.getElementById("nm-copy").addEventListener("click", function () {
+  closeNodeMenu();
+  copyNode(menuNode);
+});
+document.getElementById("nm-delete").addEventListener("click", function () {
+  closeNodeMenu();
+  requestDelete(menuNode);
+});
+
+// --- コピー ---
+// 元とは完全に別のノードを作る (新しいid)。中のノード (子) はコピーしない。
+//   クラス → クラスの設定 (継承など) だけ。中の関数・変数はコピーしない
+//   関数   → 戻り値・引数・アクセス・virtual・override など、設定をすべて
+//   変数   → 型・アクセスなど、設定をすべて
+// 名前は「Player → Player2 → Player3 …」(空いている一番小さい番号)。
+// ※ 新しく関数を追加するときは同じ名前でもよい (オーバーロード)。コピーのときだけ番号を付ける
+function copyNode(node) {
+  const parent = findParent(root, node.id);
+  if (!parent) return;
+  const copy = JSON.parse(JSON.stringify(node)); // 引数の配列なども含めて、まるごと別物にする
+  copy.id = nextId++;
+  copy.children = [];
+  copy.expanded = true;
+  if (node.isConstructor) {
+    // コンストラクタは名前がクラス名で決まっているので、名前はそのまま
+    showToast("コンストラクタをコピーしました。引数を変えて使ってください");
+  } else {
+    copy.name = makeCopyName(node);
+    showToast("「" + copy.name + "」を作りました");
+  }
+  parent.children.splice(parent.children.indexOf(node) + 1, 0, copy); // 元のすぐ下に入れる
+  copiedId = copy.id;
+  render();
+}
+
+// 「名前 + 番号」で、まだ使われていない一番小さい番号の名前を作る
+function makeCopyName(node) {
+  const kind = getKind(node);
+  // 名前がぶつかるかを調べる範囲: クラスはプロジェクト全体、関数・変数は同じクラスの中
+  const scope = kind === "class" ? root : (nearestClassNode(node) || findParent(root, node.id));
+  const used = {};
+  (function walk(n) {
+    if (getKind(n) === kind) used[n.name] = true;
+    n.children.forEach(walk);
+  })(scope);
+  const base = node.name.replace(/[0-9]+$/, "") || node.name; // Player3 をコピーしても Player○ になる
+  let n = 2;
+  while (used[base + n]) n++;
+  return base + n;
+}
+
+// =============================================
+// ノードの設定画面 (名前・種類・アクセス・型・引数)
+// 編集中は draft (下書き) を書き換え、「完了」でノードに反映する
+// =============================================
+const TYPE_CHOICES = {
+  function: ["void", "int", "float", "double", "bool", "std::string"],
+  variable: ["int", "float", "double", "bool", "char", "std::string"]
+};
+let settingsNode = null;
+let draft = null;
+
+(function setupNodeSettings() {
+  const kindButtons = document.getElementById("kind-buttons");
+  for (const key of Object.keys(NODE_KINDS)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.kind = key;
+    btn.textContent = NODE_KINDS[key].label;
+    btn.addEventListener("click", function () { changeDraftKind(key); });
+    kindButtons.appendChild(btn);
+  }
+  const accessButtons = document.getElementById("access-buttons");
+  for (const level of ACCESS_LEVELS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.access = level;
+    btn.textContent = level;
+    btn.addEventListener("click", function () {
+      draft.access = level;
+      renderNodeSettings();
+    });
+    accessButtons.appendChild(btn);
+  }
+})();
+
+function openNodeSettings(node) {
+  settingsNode = node;
+  const kind = getKind(node);
+  draft = {
+    kind: kind,
+    access: node.access || "public",
+    // 種類を切り替えて戻しても値が残るように、種類ごとに型を覚えておく
+    types: {
+      function: kind === "function" ? (node.type || "void") : "void",
+      variable: kind === "variable" ? (node.type || "int") : "int"
+    },
+    params: (node.params || []).map(function (p) { return { name: p.name, type: p.type }; }),
+    // 継承 (クラス): [{ baseId, access }]。古いデータに無ければ空
+    inheritance: (Array.isArray(node.inheritance) ? node.inheritance : []).map(function (b) { return { baseId: b.baseId, access: b.access || "public" }; }),
+    // 関数の設定。古いデータに無ければ OFF
+    isConstructor: node.isConstructor === true,
+    isVirtual: node.isVirtual === true,
+    isOverride: node.isOverride === true,
+    nameBeforeConstructor: node.name
+  };
+  document.getElementById("node-name").value = node.name;
+  document.getElementById("node-english").value = node.englishName || "";
+  document.getElementById("node-error").hidden = true;
+  renderNodeSettings();
+  document.getElementById("node-dialog").hidden = false;
+  document.querySelector("#node-dialog .dialog").scrollTop = 0;
+}
+
+function closeNodeSettings() {
+  document.getElementById("node-dialog").hidden = true;
+  settingsNode = null;
+  draft = null;
+}
+
+function changeDraftKind(kind) {
+  saveTypeInput();
+  if (draft.isConstructor && kind !== "function") {
+    document.getElementById("node-name").value = draft.nameBeforeConstructor;
+    draft.isConstructor = false;
+  }
+  draft.kind = kind;
+  renderNodeSettings();
+}
+
+// 型の入力欄の内容を下書きに入れる
+function saveTypeInput() {
+  if (draft.kind === "function" || draft.kind === "variable") {
+    draft.types[draft.kind] = document.getElementById("node-type").value;
+  }
+}
+
+// 下書きの内容に合わせて、設定画面の表示を切り替える
+function renderNodeSettings() {
+  const kind = draft.kind;
+  const isMember = kind === "function" || kind === "variable";
+
+  for (const btn of document.querySelectorAll("#kind-buttons button")) {
+    btn.setAttribute("aria-pressed", btn.dataset.kind === kind ? "true" : "false");
+  }
+  let hint = NODE_KINDS[kind].hint;
+  const place = nearestKindAbove(settingsNode); // すぐ上の(グループ以外の)ノードの種類
+  if (isMember && !isInsideClass(settingsNode)) {
+    hint += " ※ いまはクラスの外にあるので、C++クラス生成では使われません。";
+  } else if (kind === "variable") {
+    hint += place === "function" ? " → いまは関数の中なので、ローカル変数になります。" : " → いまはクラスの直下なので、メンバ変数になります。";
+  }
+  if (kind === "namespace" && isInsideClass(settingsNode)) {
+    hint += " ※ クラスの中にあるので namespace になりません (C++ ではクラスの中に namespace を作れません)。";
+  }
+  document.getElementById("kind-hint").textContent = hint;
+
+  document.getElementById("access-field").hidden = !isMember;
+  for (const btn of document.querySelectorAll("#access-buttons button")) {
+    btn.setAttribute("aria-pressed", btn.dataset.access === draft.access ? "true" : "false");
+  }
+
+  document.getElementById("type-field").hidden = !isMember;
+  if (isMember) {
+    document.getElementById("type-label").textContent = kind === "function" ? "戻り値" : "型";
+    document.getElementById("node-type").value = draft.types[kind];
+    const chips = document.getElementById("type-chips");
+    chips.innerHTML = "";
+    for (const t of TYPE_CHOICES[kind]) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.textContent = t;
+      chip.addEventListener("click", function () {
+        document.getElementById("node-type").value = t;
+        draft.types[kind] = t;
+      });
+      chips.appendChild(chip);
+    }
+  }
+
+  document.getElementById("params-field").hidden = kind !== "function";
+  if (kind === "function") renderParamList();
+  renderOopFields();
+}
+
+// 継承 (クラス) と、コンストラクタ / Virtual / Override (関数) の表示
+// 「コードで使う名前 (英語)」: 名前に日本語などが入っているときだけ表示し、自動変換の結果を見せる
+function renderEnglishField() {
+  const name = document.getElementById("node-name").value;
+  const english = document.getElementById("node-english").value.trim();
+  const ctor = draft && draft.kind === "function" && draft.isConstructor;
+  const needed = /[^\x00-\x7F]/.test(name) || english !== "";
+  document.getElementById("english-field").hidden = !needed || ctor;
+  const hint = document.getElementById("english-hint");
+  hint.classList.remove("english-warn");
+  if (english !== "") {
+    hint.textContent = "この名前でコードを作ります。";
+    return;
+  }
+  const preview = CodeGen.previewName(name);
+  if (!preview.ok) {
+    hint.textContent = "自動変換: できません (Process1 のような仮の名前になります)。英語の名前を入れてください。";
+    hint.classList.add("english-warn");
+  } else if (preview.romanized) {
+    hint.textContent = "自動変換: " + preview.text + " (辞書にない言葉をローマ字読みにしています)。英語の名前を入れると置きかわります。";
+    hint.classList.add("english-warn");
+  } else {
+    hint.textContent = "自動変換: " + preview.text;
+  }
+}
+document.getElementById("node-name").addEventListener("input", renderEnglishField);
+document.getElementById("node-english").addEventListener("input", renderEnglishField);
+
+function renderOopFields() {
+  renderEnglishField();
+  const kind = draft.kind;
+  document.getElementById("inherit-field").hidden = kind !== "class";
+  if (kind === "class") renderInheritList();
+
+  const isFunction = kind === "function";
+  document.getElementById("flags-field").hidden = !isFunction;
+  const nameInput = document.getElementById("node-name");
+  nameInput.disabled = false;
+  if (!isFunction) return;
+
+  const flags = [["flag-ctor", draft.isConstructor], ["flag-virtual", draft.isVirtual], ["flag-override", draft.isOverride]];
+  for (const pair of flags) {
+    const btn = document.getElementById(pair[0]);
+    btn.setAttribute("aria-pressed", pair[1] ? "true" : "false");
+    btn.querySelector(".state").textContent = pair[1] ? "ON" : "OFF";
+  }
+  // コンストラクタのときは、名前はクラス名・戻り値なし・virtual/override なし
+  const ctor = draft.isConstructor;
+  document.getElementById("flag-virtual").hidden = ctor;
+  document.getElementById("flag-override").hidden = ctor;
+  if (ctor) {
+    document.getElementById("type-field").hidden = true;
+    const cls = nearestClassNode(settingsNode);
+    nameInput.value = cls ? cls.name : nameInput.value;
+    nameInput.disabled = true;
+  }
+  document.getElementById("flags-hint").textContent = ctor
+    ? "コンストラクタの名前はクラス名と同じになり、戻り値はありません。引数を変えると、いくつでも作れます (オーバーロード)。"
+    : "Virtual: 子クラスで上書きできる関数にします。Override: 親クラスの Virtual な関数を上書きします (親クラスに同じ名前・同じ引数の型の Virtual 関数が必要)。";
+}
+
+function renderInheritList() {
+  const list = document.getElementById("inherit-list");
+  list.innerHTML = "";
+  // 継承元にできるのは、このプロジェクトの (自分以外の) クラス
+  const classes = [];
+  (function walk(n) {
+    if (getKind(n) === "class" && n !== settingsNode) classes.push(n);
+    n.children.forEach(walk);
+  })(root);
+  document.getElementById("add-inherit").hidden = classes.length === 0;
+  if (draft.inheritance.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "param-empty";
+    empty.textContent = classes.length === 0 ? "継承できる他のクラスがまだありません。" : "継承していません。";
+    list.appendChild(empty);
+    return;
+  }
+  draft.inheritance.forEach(function (entry, index) {
+    const row = document.createElement("div");
+    row.className = "inherit-row";
+
+    const baseSelect = document.createElement("select");
+    baseSelect.className = "select";
+    baseSelect.id = "inherit-base-" + index;
+    baseSelect.setAttribute("aria-label", (index + 1) + "番目の継承元クラス");
+    for (const c of classes) {
+      const option = document.createElement("option");
+      option.value = String(c.id);
+      option.textContent = c.name;
+      baseSelect.appendChild(option);
+    }
+    if (!classes.some(function (c) { return c.id === entry.baseId; })) entry.baseId = classes[0] ? classes[0].id : null;
+    baseSelect.value = String(entry.baseId);
+    baseSelect.addEventListener("change", function () { entry.baseId = Number(baseSelect.value); });
+
+    const accessSelect = document.createElement("select");
+    accessSelect.className = "select";
+    accessSelect.id = "inherit-access-" + index;
+    accessSelect.setAttribute("aria-label", (index + 1) + "番目の継承アクセス");
+    for (const level of ACCESS_LEVELS) {
+      const option = document.createElement("option");
+      option.value = level;
+      option.textContent = level;
+      accessSelect.appendChild(option);
+    }
+    accessSelect.value = entry.access;
+    accessSelect.addEventListener("change", function () { entry.access = accessSelect.value; });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn-icon btn-del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", (index + 1) + "番目の継承を外す");
+    del.addEventListener("click", function () {
+      draft.inheritance.splice(index, 1);
+      renderInheritList();
+    });
+
+    row.appendChild(baseSelect);
+    row.appendChild(accessSelect);
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+// node が入っている一番近いクラス (なければ null)
+function nearestClassNode(node) {
+  let parent = findParent(root, node.id);
+  while (parent) {
+    if (getKind(parent) === "class") return parent;
+    parent = findParent(root, parent.id);
+  }
+  return null;
+}
+
+document.getElementById("add-inherit").addEventListener("click", function () {
+  draft.inheritance.push({ baseId: null, access: "public" }); // 最初のクラスが選ばれる
+  renderInheritList();
+});
+
+document.getElementById("flag-ctor").addEventListener("click", function () {
+  saveTypeInput();
+  const nameInput = document.getElementById("node-name");
+  if (!draft.isConstructor) draft.nameBeforeConstructor = nameInput.value; // OFF に戻したとき用
+  draft.isConstructor = !draft.isConstructor;
+  if (!draft.isConstructor) nameInput.value = draft.nameBeforeConstructor;
+  renderNodeSettings();
+});
+document.getElementById("flag-virtual").addEventListener("click", function () {
+  draft.isVirtual = !draft.isVirtual;
+  renderOopFields();
+});
+document.getElementById("flag-override").addEventListener("click", function () {
+  draft.isOverride = !draft.isOverride;
+  renderOopFields();
+});
+
+function renderParamList() {
+  const list = document.getElementById("param-list");
+  list.innerHTML = "";
+  if (draft.params.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "param-empty";
+    empty.textContent = "引数はありません。";
+    list.appendChild(empty);
+    return;
+  }
+  const head = document.createElement("div");
+  head.className = "param-head";
+  head.innerHTML = "<span>名前</span><span>型</span><span></span>";
+  list.appendChild(head);
+
+  draft.params.forEach(function (param, index) {
+    const row = document.createElement("div");
+    row.className = "param-row";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "text-input code-input";
+    nameInput.id = "param-name-" + index;
+    nameInput.value = param.name;
+    nameInput.placeholder = "speed";
+    nameInput.autocapitalize = "off";
+    nameInput.spellcheck = false;
+    nameInput.setAttribute("aria-label", (index + 1) + "番目の引数の名前");
+    nameInput.addEventListener("input", function () { param.name = nameInput.value; });
+
+    const typeInput = document.createElement("input");
+    typeInput.type = "text";
+    typeInput.className = "text-input code-input";
+    typeInput.id = "param-type-" + index;
+    typeInput.value = param.type;
+    typeInput.placeholder = "float";
+    typeInput.autocapitalize = "off";
+    typeInput.spellcheck = false;
+    typeInput.setAttribute("list", "param-types");
+    typeInput.setAttribute("aria-label", (index + 1) + "番目の引数の型");
+    typeInput.addEventListener("input", function () { param.type = typeInput.value; });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn-icon btn-del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", (index + 1) + "番目の引数を削除");
+    del.addEventListener("click", function () {
+      draft.params.splice(index, 1);
+      renderParamList();
+    });
+
+    row.appendChild(nameInput);
+    row.appendChild(typeInput);
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+// 引数の型の候補 (入力欄の候補リスト)
+(function () {
+  const datalist = document.createElement("datalist");
+  datalist.id = "param-types";
+  for (const t of ["int", "float", "double", "bool", "char", "std::string"]) {
+    const option = document.createElement("option");
+    option.value = t;
+    datalist.appendChild(option);
+  }
+  document.body.appendChild(datalist);
+})();
+
+// node のすぐ上にある、グループ以外のノードの種類 (なければ "group")
+function nearestKindAbove(node) {
+  let parent = findParent(root, node.id);
+  while (parent) {
+    if (getKind(parent) !== "group") return getKind(parent);
+    parent = findParent(root, parent.id);
+  }
+  return "group";
+}
+
+// node がクラスの中にあるか (親・祖先にクラスがあるか)
+function isInsideClass(node) {
+  let parent = findParent(root, node.id);
+  while (parent) {
+    if (getKind(parent) === "class") return true;
+    parent = findParent(root, parent.id);
+  }
+  return false;
+}
+
+document.getElementById("add-param").addEventListener("click", function () {
+  draft.params.push({ name: "", type: "int" });
+  renderParamList();
+  document.getElementById("param-name-" + (draft.params.length - 1)).focus();
+});
+
+document.getElementById("node-cancel").addEventListener("click", closeNodeSettings);
+
+document.getElementById("node-form").addEventListener("submit", function (e) {
+  e.preventDefault();
+  const name = document.getElementById("node-name").value.trim();
+  if (name === "") {
+    const error = document.getElementById("node-error");
+    error.textContent = "名前を入力してください。";
+    error.hidden = false;
+    return;
+  }
+  saveTypeInput();
+  const node = settingsNode;
+  node.name = name;
+  node.kind = draft.kind;
+  // コードで使う英語名 (英数字・スペース・アンダーバーだけ)。空なら自動変換
+  const english = document.getElementById("node-english").value.replace(/[^A-Za-z0-9 _]/g, " ").replace(/\s+/g, " ").trim();
+  if (english !== "" && !node.isConstructor && !draft.isConstructor) node.englishName = english;
+  else delete node.englishName;
+
+  // 種類に関係ない項目は消しておく (保存データをきれいに保つ)
+  delete node.access;
+  delete node.type;
+  delete node.params;
+  delete node.inheritance;
+  delete node.isConstructor;
+  delete node.isVirtual;
+  delete node.isOverride;
+  if (draft.kind === "class") {
+    const bases = draft.inheritance.filter(function (b) { return b.baseId !== null && b.baseId !== undefined; });
+    if (bases.length) node.inheritance = bases.map(function (b) { return { baseId: b.baseId, access: b.access }; });
+  }
+  if (draft.kind === "function") {
+    if (draft.isConstructor) node.isConstructor = true;
+    if (draft.isVirtual && !draft.isConstructor) node.isVirtual = true;
+    if (draft.isOverride && !draft.isConstructor) node.isOverride = true;
+  }
+  if (draft.kind === "function" || draft.kind === "variable") {
+    node.access = draft.access;
+    node.type = draft.types[draft.kind].trim() || (draft.kind === "function" ? "void" : "int");
+  }
+  if (draft.kind === "function") {
+    node.params = draft.params
+      .map(function (p) { return { name: p.name.trim(), type: p.type.trim() }; })
+      .filter(function (p) { return p.name !== "" || p.type !== ""; });
+  }
+
+  closeNodeSettings();
+  render(); // 画面を作り直す (自動保存もここで行われる)
+});
+
+// =============================================
+// コード生成画面 (生成そのものは上の CodeGen が担当)
+//
+// 2つのモード:
+//   normal … 通常のコード生成 (C++ / C# / JavaScript)。1つのコード
+//   class  … C++クラス生成。クラスごとに .h と .cpp
+// =============================================
+let codeLanguage = "cpp";
+let codeStyle = CodeGen.languages.cpp.defaultStyle;
+let codeMode = "normal";
+let codeEdited = false; // 生成したあと、ユーザーがコードを書き換えたか
+
+// C++クラス生成の結果
+let classFiles = [];        // [{ fileName, className, kind: "h"|"cpp", text }] (編集した内容もここに入る)
+let currentClassName = "";  // 表示中のクラス
+let currentFileKind = "h";  // 表示中のファイル ("h" か "cpp")
+
+const codeEditor = document.getElementById("code-editor");
+
+// 言語ボタンと書き方の選択肢を作る (CodeGen に登録された言語から自動で作る)
+(function setupCodeOptions() {
+  const langButtons = document.getElementById("lang-buttons");
+  for (const key of Object.keys(CodeGen.languages)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.lang = key;
+    btn.textContent = CodeGen.languages[key].label;
+    btn.addEventListener("click", function () { changeLanguage(key); });
+    langButtons.appendChild(btn);
+  }
+  const select = document.getElementById("style-select");
+  for (const key of Object.keys(CodeGen.styles)) {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = CodeGen.styles[key].label;
+    select.appendChild(option);
+  }
+  select.addEventListener("change", function () {
+    const newStyle = select.value;
+    select.value = codeStyle; // 確認でキャンセルされたら元のまま
+    confirmDiscardEdits(function () {
+      codeStyle = newStyle;
+      generateCode();
+    });
+  });
+  for (const btn of document.querySelectorAll("#mode-buttons button")) {
+    btn.addEventListener("click", function () { changeMode(btn.dataset.mode); });
+  }
+  // C++ 命名規則の表 (CodeGen.cppNaming.rules から作る)
+  const rulesBody = document.getElementById("cpp-rules-body");
+  for (const r of CodeGen.cppNaming.rules) {
+    const tr = document.createElement("tr");
+    const target = document.createElement("td");
+    target.textContent = r.target;
+    const rule = document.createElement("td");
+    const name = document.createElement("span");
+    name.className = "rule-name";
+    name.textContent = r.rule;
+    const example = document.createElement("span");
+    example.className = "rule-example";
+    example.textContent = "例: " + r.example;
+    rule.appendChild(name);
+    rule.appendChild(example);
+    tr.appendChild(target);
+    tr.appendChild(rule);
+    rulesBody.appendChild(tr);
+  }
+})();
+
+// ツリーにクラスがあるか
+function hasClassNode(node) {
+  if (getKind(node) === "class") return true;
+  return node.children.some(hasClassNode);
+}
+
+function openCodeScreen() {
+  autoSave();
+  // クラスを設計しているなら、C++クラス生成を最初に表示する
+  if (hasClassNode(root)) {
+    codeLanguage = "cpp";
+    codeStyle = CodeGen.languages.cpp.defaultStyle;
+    codeMode = "class";
+  } else {
+    codeMode = "normal";
+  }
+  document.getElementById("code-title").textContent = data.projects[currentId].name;
+  showScreen("code");
+  generateCode();
+  window.scrollTo(0, 0);
+}
+
+function isClassMode() {
+  return codeLanguage === "cpp" && codeMode === "class";
+}
+
+// コードを作って画面に出す
+function generateCode() {
+  if (isClassMode()) {
+    generateClassFiles();
+  } else {
+    const result = CodeGen.generate(root, {
+      language: codeLanguage,
+      style: codeLanguage === "cpp" ? "pascal" : codeStyle, // C++ は命名規則で PascalCase に固定
+      title: data.projects[currentId].name
+    });
+    codeEditor.value = result.code;
+    renderNameMap(result.model);
+  }
+  codeEdited = false;
+  updateCodeOptions();
+  renderEnglishPanel();
+  fitEditorHeight();
+}
+
+// 書き換えたコードが消える操作の前に確認する
+function confirmDiscardEdits(onOk) {
+  if (!codeEdited) { onOk(); return; }
+  showConfirm(
+    "コードを作り直しますか？",
+    "画面で書き換えた内容は消えて、設計ツリーから作り直したコードになります。",
+    "作り直す",
+    onOk
+  );
+}
+
+function changeLanguage(key) {
+  if (key === codeLanguage) return;
+  confirmDiscardEdits(function () {
+    codeLanguage = key;
+    codeStyle = CodeGen.languages[key].defaultStyle; // 言語ごとのよく使われる書き方にする
+    generateCode();
+  });
+}
+
+function changeMode(mode) {
+  if (mode === codeMode) return;
+  confirmDiscardEdits(function () {
+    codeMode = mode;
+    generateCode();
+  });
+}
+
+// 表示の切り替え (モードによって出す部品が変わる)
+function updateCodeOptions() {
+  const classMode = isClassMode();
+  for (const btn of document.querySelectorAll("#lang-buttons button")) {
+    btn.setAttribute("aria-pressed", btn.dataset.lang === codeLanguage ? "true" : "false");
+  }
+  document.getElementById("mode-buttons").hidden = codeLanguage !== "cpp";
+  for (const btn of document.querySelectorAll("#mode-buttons button")) {
+    btn.setAttribute("aria-pressed", btn.dataset.mode === codeMode ? "true" : "false");
+  }
+  document.getElementById("style-row").hidden = codeLanguage === "cpp"; // C++ は命名規則の表に従う
+  document.getElementById("cpp-rules").hidden = codeLanguage !== "cpp";
+  document.getElementById("style-select").value = codeStyle;
+  document.getElementById("name-map").hidden = classMode;
+  document.getElementById("class-area").hidden = !classMode;
+  document.getElementById("file-list-area").hidden = !classMode || classFiles.length === 0;
+  document.getElementById("file-actions").hidden = !classMode || classFiles.length === 0;
+  codeEditor.hidden = classMode && classFiles.length === 0;
+  document.getElementById("code-note").textContent = classMode
+    ? "設計したクラス・変数・関数の宣言と、空の関数本体だけを作ります。中身は自分で書いてください。ファイルはこの画面で直接編集できます。"
+    : "設計ツリーにある処理だけから、関数の骨組みを作ります。中身(TODO の部分)は自分で書いてください。コードはこの画面で直接編集できます。";
+}
+
+// --- C++クラス生成 ---
+
+function generateClassFiles() {
+  const result = CodeGen.generateCppClasses(root);
+  classFiles = result.files;
+
+  const notices = document.getElementById("class-notices");
+  notices.innerHTML = "";
+  for (const text of result.notices) {
+    const li = document.createElement("li");
+    li.textContent = text;
+    notices.appendChild(li);
+  }
+  notices.hidden = result.notices.length === 0;
+  document.getElementById("class-empty").hidden = result.classes.length > 0;
+
+  // 前に見ていたクラスがまだあればそのまま、なければ最初のクラス
+  const names = result.classes.map(function (c) { return c.fileName; });
+  if (names.indexOf(currentClassName) < 0) currentClassName = names[0] || "";
+  renderClassTabs(names);
+  showClassFile();
+  renderFileList();
+}
+
+function getCurrentFile() {
+  return classFiles.find(function (f) {
+    return f.className === currentClassName && f.kind === currentFileKind;
+  });
+}
+
+function renderClassTabs(names) {
+  const tabs = document.getElementById("class-tabs");
+  tabs.innerHTML = "";
+  tabs.hidden = names.length <= 1; // クラスが1つなら選ぶ必要がない
+  for (const name of names) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.textContent = name;
+    btn.setAttribute("aria-pressed", name === currentClassName ? "true" : "false");
+    btn.addEventListener("click", function () {
+      currentClassName = name;
+      renderClassTabs(names);
+      showClassFile();
+    });
+    tabs.appendChild(btn);
+  }
+}
+
+// ヘッダー(.h) / cpp のタブと、そのファイルの中身を表示
+function showClassFile() {
+  const fileTabs = document.getElementById("file-tabs");
+  fileTabs.innerHTML = "";
+  fileTabs.hidden = !currentClassName;
+  if (!currentClassName) return;
+  for (const kind of ["h", "cpp"]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = currentClassName + "." + kind;
+    btn.setAttribute("aria-pressed", kind === currentFileKind ? "true" : "false");
+    btn.addEventListener("click", function () {
+      currentFileKind = kind;
+      showClassFile();
+    });
+    fileTabs.appendChild(btn);
+  }
+  const file = getCurrentFile();
+  codeEditor.value = file.text;
+  document.getElementById("download-btn").textContent = file.fileName + " をダウンロード";
+  fitEditorHeight();
+}
+
+function renderFileList() {
+  const list = document.getElementById("file-list");
+  list.innerHTML = "";
+  for (const file of classFiles) {
+    const li = document.createElement("li");
+    li.className = "file-row";
+    const name = document.createElement("span");
+    name.className = "file-name";
+    name.textContent = file.fileName;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tool-btn";
+    btn.textContent = "ダウンロード";
+    btn.setAttribute("aria-label", file.fileName + " をダウンロード");
+    btn.addEventListener("click", function () { downloadFiles([file], file.fileName); });
+    li.appendChild(name);
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+}
+
+document.getElementById("download-btn").addEventListener("click", function () {
+  const file = getCurrentFile();
+  if (file) downloadFiles([file], file.fileName);
+});
+
+document.getElementById("zip-btn").addEventListener("click", function () {
+  const name = (data.projects[currentId].name || "classes").replace(/[\\/:*?"<>|]/g, "_");
+  downloadFiles(classFiles, name + ".zip");
+});
+
+// --- ダウンロード ---
+// claude.ai で公開したページでは、ブラウザの通常のダウンロードが使えないため、
+// ページを表示しているアプリの「downloads」機能で保存する (.h / .cpp は ZIP にまとめる)。
+// ローカルの HTML ファイルでは、普通のダウンロードを使う。
+let downloadsApi = null;
+if (window.claude && typeof window.claude.use === "function") {
+  window.claude.use("downloads").then(function (api) { downloadsApi = api; }, function () {});
+}
+
+function downloadFiles(files, suggestedName) {
+  const inClaude = !!(window.claude && typeof window.claude.use === "function");
+  if (inClaude) {
+    if (!downloadsApi) {
+      showToast("このページではダウンロードできません。「コピー」を使ってください");
+      return;
+    }
+    const zipName = /\.zip$/.test(suggestedName) ? suggestedName : suggestedName + ".zip";
+    downloadsApi.save({ filename: zipName, data: makeZip(files) }).then(function () {
+      showToast(zipName + " を保存しました");
+    }, function (err) {
+      if (err && err.code === "declined") return; // 自分でキャンセルした
+      showToast("保存できませんでした。「コピー」を使ってください");
+    });
+    return;
+  }
+  // ローカル: 1つならそのファイル、複数なら ZIP
+  const blob = files.length === 1 && !/\.zip$/.test(suggestedName)
+    ? new Blob([files[0].text], { type: "text/plain" })
+    : makeZip(files);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  showToast(suggestedName + " をダウンロードしました");
+}
+
+// ZIP ファイルを作る (圧縮なしの一番かんたんな形式)
+function makeZip(files) {
+  const encoder = new TextEncoder();
+  const crcTable = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    crcTable.push(c >>> 0);
+  }
+  function crc32(bytes) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(file.fileName);
+    const body = encoder.encode(file.text);
+    const crc = crc32(body);
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true); // ファイル名は UTF-8
+    local.setUint16(8, 0, true);      // 圧縮なし
+    local.setUint16(10, dosTime, true);
+    local.setUint16(12, dosDate, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, body.length, true);
+    local.setUint32(22, body.length, true);
+    local.setUint16(26, name.length, true);
+    local.setUint16(28, 0, true);
+    parts.push(local.buffer, name, body);
+
+    const entry = new DataView(new ArrayBuffer(46));
+    entry.setUint32(0, 0x02014b50, true);
+    entry.setUint16(4, 20, true);
+    entry.setUint16(6, 20, true);
+    entry.setUint16(8, 0x0800, true);
+    entry.setUint16(10, 0, true);
+    entry.setUint16(12, dosTime, true);
+    entry.setUint16(14, dosDate, true);
+    entry.setUint32(16, crc, true);
+    entry.setUint32(20, body.length, true);
+    entry.setUint32(24, body.length, true);
+    entry.setUint16(28, name.length, true);
+    entry.setUint32(42, offset, true);
+    central.push(entry.buffer, name);
+
+    offset += 30 + name.length + body.length;
+  }
+  let centralSize = 0;
+  for (const part of central) centralSize += part.byteLength;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, files.length, true);
+  end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, offset, true);
+  return new Blob(parts.concat(central, [end.buffer]), { type: "application/zip" });
+}
+
+// --- 通常のコード生成: 「ノード名 → 関数名」の対応表 ---
+function renderNameMap(model) {
+  const body = document.getElementById("name-map-body");
+  body.innerHTML = "";
+  let fallbackCount = 0;
+  for (const f of model.functions) {
+    const tr = document.createElement("tr");
+    if (!f.converted) { tr.className = "fallback"; fallbackCount++; }
+    const from = document.createElement("td");
+    from.textContent = f.label;
+    const to = document.createElement("td");
+    to.textContent = f.name + (f.converted ? "" : " (仮)");
+    tr.appendChild(from);
+    tr.appendChild(to);
+    body.appendChild(tr);
+  }
+  document.getElementById("name-map-summary").textContent =
+    "名前の変換 (" + model.functions.length + ")" + (fallbackCount ? " · 仮の名前 " + fallbackCount + " 個" : "");
+}
+
+// 入力欄の高さを中身に合わせる (縦は画面ごとスクロール、横は入力欄の中でスクロール)
+function fitEditorHeight() {
+  codeEditor.style.height = "auto";
+  codeEditor.style.height = (codeEditor.scrollHeight + 4) + "px";
+}
+
+codeEditor.addEventListener("input", function () {
+  codeEdited = true;
+  // C++クラス生成では、編集した内容をそのファイルに覚えておく (タブを切り替えても消えない)
+  if (isClassMode()) {
+    const file = getCurrentFile();
+    if (file) file.text = codeEditor.value;
+  }
+  fitEditorHeight();
+});
+
+// コピー (表示中のコード)
+document.getElementById("copy-btn").addEventListener("click", function () {
+  const text = codeEditor.value;
+  function fallbackCopy() {
+    codeEditor.focus();
+    codeEditor.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    showToast(ok ? "コードをコピーしました" : "コードを選択しました。メニューからコピーしてください");
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () {
+      const file = isClassMode() ? getCurrentFile() : null;
+      showToast((file ? file.fileName + " を" : "コードを") + "コピーしました");
+    }, fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+});
+
+document.getElementById("regen-btn").addEventListener("click", function () {
+  confirmDiscardEdits(function () {
+    generateCode();
+    showToast("設計ツリーからコードを作り直しました");
+  });
+});
+
+document.getElementById("code-btn").addEventListener("click", openCodeScreen);
+
+document.getElementById("code-back-btn").addEventListener("click", function () {
+  showScreen("editor");
+  render();
+  window.scrollTo(0, 0);
+});
+
+// =============================================
+// クラウド同期 (claude.ai のリンクで開いたときだけ)
+//
+// しくみ:
+//   - 保存先: claude.ai にある「その人専用の保存場所」
+//       data/users/<自分のid>/app/projects/<プロジェクトid>
+//     本人以外 (アプリを作った人も含む) は読めません。
+//   - 1プロジェクト = 1つのドキュメント { id, name, updatedAt, treeJson }
+//     (ツリーは深くなることがあるので、JSON の文字列にして保存)
+//   - ブラウザ (localStorage) にもこれまで通り保存し、すぐ表示できるようにしておく
+//   - 同じプロジェクトが両方にあるときは、updatedAt が新しい方を使う
+//   - ローカルの HTML ファイルやログインしていないときは window.claude が無いので、
+//     この部分は何もせず、ブラウザだけに保存する
+// =============================================
+const cloud = {
+  status: "local",     // local / connecting / synced / saving / error / unavailable
+  projectsRef: null,   // クラウドの projects コレクション
+  ready: false,        // 最初の読み込み(サーバーからの確定した内容)が終わったか
+  pending: {},         // まだクラウドに送っていないプロジェクトid
+  timer: null,
+  writing: false,
+  everWrote: false     // 一度でも書き込めたか
+};
+
+function syncLabel() {
+  switch (cloud.status) {
+    case "connecting": return "クラウドに接続中…";
+    case "saving": return "クラウドに保存中…";
+    case "synced": return "クラウドと同期済み";
+    case "error": return "同期できませんでした (この端末には保存済み)";
+    case "unavailable": return "この端末だけに保存 (同期できません)";
+    case "signedout": return "ログインしていません (この端末だけに保存)";
+    default: return "この端末のブラウザに保存";
+  }
+}
+
+function setCloudStatus(status) {
+  cloud.status = status;
+  updateSaveState();
+}
+
+async function startCloudSync() {
+  if (!window.claude || typeof window.claude.use !== "function") {
+    // 独立アプリ版 (Firebase の設定あり): ログインすると firebase-sync.js が DesignTreeCloud.connect でつなぐ
+    if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) setCloudStatus("signedout");
+    return;
+  }
+  setCloudStatus("connecting");
+  let db = null;
+  let uid = null;
+  try {
+    const results = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+    db = results[0];
+    if (results[1]) uid = await results[1].id();
+  } catch (e) {
+    db = null;
+  }
+  if (!db || !uid) { // ログインしていない・使えない環境
+    setCloudStatus("unavailable");
+    return;
+  }
+  cloud.projectsRef = db.doc("data/users/" + uid + "/app").collection("projects");
+  // 変更をリアルタイムで受け取る (1回だけ登録する)
+  cloud.projectsRef.onSnapshot(applyCloudSnapshot, function () {
+    setCloudStatus("error");
+  });
+}
+
+// クラウドの内容が届いたとき (最初の1回と、別の端末で変更があるたび)
+function applyCloudSnapshot(snap) {
+  let changed = false;
+  const remoteIds = {};
+
+  for (const doc of snap.docs) {
+    remoteIds[doc.id] = true;
+    if (applyRemoteProject(doc.data())) changed = true;
+  }
+  // 別の端末で削除されたプロジェクト
+  for (const change of snap.docChanges()) {
+    if (change.type !== "removed") continue;
+    const id = change.doc.id;
+    if (data.projects[id] && !cloud.pending[id]) {
+      delete data.projects[id];
+      changed = true;
+      if (id === currentId) {
+        backToProjects();
+        showToast("このプロジェクトは別の端末で削除されました");
+      }
+    }
+  }
+
+  // 最初の確定した読み込み: この端末にしかないプロジェクトをクラウドへ送る (今までのデータの引っ越し)
+  if (!cloud.ready && !snap.metadata.fromCache) {
+    cloud.ready = true;
+    for (const id of Object.keys(data.projects)) {
+      if (!remoteIds[id]) queueCloudWrite(id);
+    }
+    if (Object.keys(cloud.pending).length === 0) setCloudStatus("synced");
+  }
+
+  if (changed) {
+    writeLocal();
+    if (!document.getElementById("projects-screen").hidden) renderProjectList();
+  }
+}
+
+// クラウドのプロジェクト1つを取り込む。取り込んだら true
+function applyRemoteProject(body) {
+  if (!body || !body.id || typeof body.treeJson !== "string") return false;
+  const local = data.projects[body.id];
+  if (cloud.pending[body.id]) return false; // この端末の変更をまだ送っていない → こちらを優先
+  if (local && (local.updatedAt || "") >= (body.updatedAt || "")) {
+    // この端末の方が新しい → クラウドへ送る
+    if (local.updatedAt > body.updatedAt) queueCloudWrite(body.id);
+    return false;
+  }
+  // 開いているプロジェクトを編集している最中なら、上書きしない (次の保存でこちらが送られる)
+  if (body.id === currentId && isBusyEditing()) return false;
+
+  let tree;
+  try { tree = JSON.parse(body.treeJson); } catch (e) { return false; }
+  data.projects[body.id] = { id: body.id, name: body.name, updatedAt: body.updatedAt, tree: tree };
+
+  // いま開いているプロジェクトなら、画面のツリーも入れ替える
+  if (body.id === currentId) {
+    root = tree;
+    nextId = getMaxId(root) + 1;
+    lastSavedJson = JSON.stringify(root);
+    if (!document.getElementById("editor-screen").hidden) render();
+  }
+  return true;
+}
+
+// 名前の入力中・設定画面・ドラッグ中など、ツリーを触っている最中か
+function isBusyEditing() {
+  return editingId !== null || !document.getElementById("node-dialog").hidden ||
+    (typeof drag !== "undefined" && drag !== null);
+}
+
+// プロジェクトをクラウドに送る予定に入れる (少し待ってまとめて送る)
+function queueCloudWrite(id) {
+  if (!cloud.projectsRef) return;
+  cloud.pending[id] = true;
+  setCloudStatus("saving");
+  clearTimeout(cloud.timer);
+  cloud.timer = setTimeout(flushCloud, 800);
+}
+
+// 予定に入っているプロジェクトを1つずつ送る
+async function flushCloud() {
+  clearTimeout(cloud.timer);
+  if (!cloud.projectsRef || cloud.writing) return;
+  cloud.writing = true;
+  let failed = false;
+  while (Object.keys(cloud.pending).length > 0) {
+    const id = Object.keys(cloud.pending)[0];
+    delete cloud.pending[id];
+    const project = data.projects[id];
+    try {
+      if (project) {
+        await cloud.projectsRef.doc(id).set({
+          id: project.id,
+          name: project.name,
+          updatedAt: project.updatedAt,
+          treeJson: JSON.stringify(project.tree)
+        });
+      } else {
+        await cloud.projectsRef.doc(id).delete(); // 削除したプロジェクト
+      }
+      cloud.everWrote = true;
+    } catch (err) {
+      const code = err && err.code;
+      if (code === "invalid_argument" && !cloud.everWrote) {
+        // 書き込む権限がない (共有で「閲覧のみ」の人など) → この端末だけに保存する
+        cloud.projectsRef = null;
+        cloud.pending = {};
+        cloud.writing = false;
+        setCloudStatus("unavailable");
+        return;
+      }
+      if (code === "invalid_argument") {
+        showToast("「" + (project ? project.name : id) + "」は大きすぎてクラウドに保存できません");
+      } else if (code === "quota_exceeded") {
+        showToast("クラウドの保存容量がいっぱいです。使わないプロジェクトを削除してください");
+      } else {
+        cloud.pending[id] = true; // 通信の問題など → あとでもう一度
+        failed = true;
+        break;
+      }
+    }
+  }
+  cloud.writing = false;
+  if (failed) {
+    setCloudStatus("error");
+    cloud.timer = setTimeout(flushCloud, 5000);
+  } else if (Object.keys(cloud.pending).length === 0) {
+    setCloudStatus(cloud.ready ? "synced" : "saving");
+  }
+}
+
+// ---- 外部のクラウドとつなぐ入口 (独立アプリ版の firebase-sync.js が使う) ----
+// projectsRef は claude.ai の db と同じ形: onSnapshot(next, error) / doc(id).set(body) / doc(id).delete()
+const OWNER_KEY = "designTree.owner"; // この端末のデータが、どのアカウントのものか
+window.DesignTreeCloud = {
+  connect: function (projectsRef, ownerId) {
+    let owner = null;
+    try { owner = localStorage.getItem(OWNER_KEY); } catch (e) { owner = null; }
+    // 別のアカウントのデータがこの端末に残っていたら、混ざらないように先に消す
+    if (owner && owner !== ownerId) clearLocalProjects();
+    try { localStorage.setItem(OWNER_KEY, ownerId); } catch (e) { /* 保存できなくても続ける */ }
+    cloud.ready = false;
+    cloud.pending = {};
+    cloud.everWrote = false;
+    cloud.projectsRef = projectsRef;
+    setCloudStatus("connecting");
+    cloud.unsubscribe = projectsRef.onSnapshot(applyCloudSnapshot, function () { setCloudStatus("error"); });
+  },
+  // ログアウト: 同期をやめ、この端末のデータを消す (次の人に見えないように)
+  disconnect: function () {
+    if (cloud.unsubscribe) cloud.unsubscribe();
+    cloud.unsubscribe = null;
+    cloud.projectsRef = null;
+    cloud.pending = {};
+    cloud.ready = false;
+    clearLocalProjects();
+    try { localStorage.removeItem(OWNER_KEY); } catch (e) { /* 何もしない */ }
+    setCloudStatus("signedout");
+  },
+  hasPendingChanges: function () { return Object.keys(cloud.pending).length > 0 || cloud.writing; },
+  flush: function () { return flushCloud(); },
+  setStatus: setCloudStatus
+};
+
+function clearLocalProjects() {
+  data = { projects: {} };
+  writeLocal();
+  if (currentId) {
+    currentId = null;
+    showScreen("projects");
+  }
+  renderProjectList();
+}
+
+// 画面を閉じる・アプリを切り替えるときは、待たずにすぐ送る
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") flushCloud();
+});
+
+// =============================================
+// 英語名: ローマ字読み・仮の名前になってしまう名前を知らせて、英語名をすすめる
+//   - ノードの設定で「コードで使う名前 (英語)」を入れれば、その名前を使う
+//   - claude.ai で開いているときは「AIで英語名を提案」で、まとめて提案してもらえる
+// =============================================
+let englishTargets = []; // 英語名があるとよいノード
+let sampleApi = null;    // claude.ai の「Claude に聞く」機能 (使えないときは null)
+let sampleRefused = false;
+
+if (window.claude && typeof window.claude.use === "function") {
+  window.claude.use("sample").then(function (api) {
+    sampleApi = api;
+    if (!document.getElementById("code-screen").hidden) renderEnglishPanel();
+  }, function () {});
+}
+
+// いまのモードでコードの名前になるノードのうち、ローマ字読み・仮の名前になるもの
+function findEnglishTargets() {
+  const classMode = isClassMode();
+  const targets = [];
+  (function walk(node) {
+    const kind = getKind(node);
+    const usedInCode = classMode ? kind !== "group" && !(kind === "function" && node.isConstructor) : kind !== "variable";
+    if (usedInCode && !node.englishName) {
+      const info = CodeGen.nameInfo(node.name);
+      if (!info.words || info.romanized) targets.push({ node: node, info: info });
+    }
+    node.children.forEach(walk);
+  })(root);
+  return targets;
+}
+
+function renderEnglishPanel() {
+  const found = findEnglishTargets();
+  englishTargets = found.map(function (t) { return t.node; });
+  const panel = document.getElementById("english-panel");
+  panel.hidden = found.length === 0;
+  if (found.length === 0) return;
+  document.getElementById("english-title").textContent =
+    "英語になっていない名前が " + found.length + " 個あります";
+  const list = document.getElementById("english-list");
+  list.innerHTML = "";
+  for (const t of found.slice(0, 8)) {
+    const li = document.createElement("li");
+    const preview = CodeGen.previewName(t.node.name);
+    li.textContent = t.node.name + " → ";
+    const auto = document.createElement("span");
+    auto.className = "auto";
+    auto.textContent = preview.ok ? preview.text + " (ローマ字読み)" : "仮の名前";
+    li.appendChild(auto);
+    list.appendChild(li);
+  }
+  if (found.length > 8) {
+    const more = document.createElement("li");
+    more.textContent = "ほか " + (found.length - 8) + " 個";
+    list.appendChild(more);
+  }
+  document.getElementById("ai-english-btn").hidden = !sampleApi || sampleRefused;
+}
+
+function toPascalWords(text) {
+  return text.split(" ").filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join("");
+}
+
+document.getElementById("ai-english-btn").addEventListener("click", async function () {
+  const btn = document.getElementById("ai-english-btn");
+  if (!sampleApi || englishTargets.length === 0) return;
+  const items = englishTargets.slice(0, 60).map(function (n) {
+    return { id: n.id, name: n.name, kind: NODE_KINDS[getKind(n)].label };
+  });
+  const prompt = [
+    "You name things in source code. Convert each Japanese name from a program design tree into a short, natural English name. Do NOT use romaji.",
+    "Rules:",
+    "- Translate the meaning. Katakana loanwords become the original English word. Proper nouns use their official English spelling.",
+    "- 1 to 4 English words separated by spaces. Letters and digits only.",
+    "- For actions and processes (関数, グループ), start with a verb. Example: 敵を動かす -> \"move enemy\", ゴールに着いたか判定 -> \"check goal reached\".",
+    "- For classes, variables and namespaces, use a noun phrase.",
+    "Return only JSON: {\"names\":[{\"id\": <id>, \"english\": \"<words>\"}]} with one entry for every item.",
+    "Items:",
+    JSON.stringify(items)
+  ].join("\n");
+
+  btn.disabled = true;
+  btn.textContent = "提案を作成中…";
+  try {
+    const result = await sampleApi.json(prompt, { modelTier: "quick" });
+    const answers = result && Array.isArray(result.names) ? result.names : [];
+    const proposals = [];
+    for (const a of answers) {
+      const node = englishTargets.find(function (n) { return n.id === Number(a.id); });
+      const words = typeof a.english === "string" ? a.english.replace(/[^A-Za-z0-9 ]/g, " ").replace(/\s+/g, " ").trim() : "";
+      if (node && /^[A-Za-z]/.test(words)) proposals.push({ node: node, english: toPascalWords(words) });
+    }
+    if (proposals.length === 0) {
+      showToast("英語名の提案を受け取れませんでした。もう一度試してください");
+      return;
+    }
+    showConfirm(
+      "この英語名にしますか？",
+      proposals.map(function (p) { return p.node.name + " → " + p.english; }).join("　/　") +
+        "　(あとからノードの設定で変更できます" + (codeEdited ? "。画面で書き換えたコードは作り直されます" : "") + ")",
+      "設定する",
+      function () {
+        for (const p of proposals) p.node.englishName = p.english;
+        autoSave();
+        generateCode();
+        showToast(proposals.length + " 個の英語名を設定しました");
+      }
+    );
+  } catch (err) {
+    const code = err && err.code;
+    if (code === "not_granted" || code === "unavailable") {
+      sampleRefused = true;
+      btn.hidden = true;
+      showToast("AIの提案は使えません。ノードの設定で英語名を入力してください");
+    } else if (code === "rate_limited") {
+      showToast("少し待ってから、もう一度試してください");
+    } else {
+      showToast("提案を作れませんでした。もう一度試してください");
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "AIで英語名を提案";
+  }
+});
+
+// =============================================
+// 起動: 保存データを読み込んで、プロジェクト一覧を表示
+// =============================================
+loadData();
+showScreen("projects");
+renderProjectList();
+updateSaveState();
+startCloudSync(); // claude.ai で開いているときだけ、クラウドと同期を始める
+</script>
+<script type="module" src="firebase-sync.js"></script>
+<script>
+  // オフラインでも開けるように、サービスワーカーを登録する
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
+</script>
+</body>
+</html>
